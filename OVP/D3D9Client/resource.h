@@ -258,3 +258,6 @@
 #define IDC_ROCK_DIST_MEDIUM_TXT                4080
 #define IDC_ROCK_DIST_LARGE                     4081
 #define IDC_ROCK_DIST_LARGE_TXT                 4082
+#define IDC_SHOW_ROCK_COL                       4083
+#define IDC_SHOW_BASE_COL                       4084
+#define IDC_SHOW_VESSEL_COL                     4085

@@ -98,11 +98,10 @@ public:
 	int bIrradiance;
 	int bAtmoQuality;
 	int NoPlanetAA;					///< Disable planet surface anti-aliasing to prevent white pixels at horizon 
-	int bRockEnable;				///< Surface rock scatter enable (0=disabled, 1=enabled, default=1)
-	int bRockCollision;             ///< Surface rock scatter collisions (0=disabled, 1=enabled, default=0)
 	int bRockShadows;				///< Surface rock shadow casting (0=disabled, 1=enabled, default=1)
-	float fRockDensityMult;			///< Surface rock density multiplier (0.1...3.0, default=1.0)
-	float fRockMaxDist;				///< Surface rock max draw distance [m] (100...20000, default=2000)
+	int bShowRockColliders;			///< Render visual wireframes/bounds for rock colliders
+	int bShowBaseColliders;			///< Render visual wireframes/bounds for base colliders
+	int bShowVesselColliders;		///< Render visual wireframes/bounds for vessel colliders
 	float fRockDistSmall;			///< Small rock draw distance multiplier (0.0...1.0, default=0.25)
 	float fRockDistMedium;			///< Medium rock draw distance multiplier (0.0...1.0, default=0.5)
 	float fRockDistLarge;			///< Large rock draw distance multiplier (0.0...1.0, default=1.0)

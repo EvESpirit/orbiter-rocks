@@ -1,3 +1,5 @@
+#include "D3D9Client.h"
+extern class D3D9Client* g_client;
 // ==============================================================
 // Class VideoTab (implementation)
 // Manages the user selections in the "Video" tab of the Orbiter
@@ -512,16 +514,6 @@ INT_PTR CALLBACK VideoTab::SetupDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 				sprintf_s(lbl,32,"%1.0f%%",float(pos));
 				SetWindowTextA(GetDlgItem(hWnd, IDC_SEPA_DSP), lbl);
 			}
-			if (HWND(lParam)==GetDlgItem(hWnd, IDC_ROCK_DENSITY)) {
-				Config->fRockDensityMult = float(pos) / 10.0f;
-				sprintf_s(lbl,32,"%.1fx", Config->fRockDensityMult);
-				SetWindowTextA(GetDlgItem(hWnd, IDC_ROCK_DENSITY_TXT), lbl);
-			}
-			if (HWND(lParam)==GetDlgItem(hWnd, IDC_ROCK_DIST)) {
-				Config->fRockMaxDist = float(pos) * 100.0f;
-				sprintf_s(lbl,32,"%dm", (int)Config->fRockMaxDist);
-				SetWindowTextA(GetDlgItem(hWnd, IDC_ROCK_DIST_TXT), lbl);
-			}
 			if (HWND(lParam)==GetDlgItem(hWnd, IDC_ROCK_DIST_SMALL)) {
 				Config->fRockDistSmall = float(pos) / 100.0f;
 				sprintf_s(lbl,32,"%d%%", (int)(Config->fRockDistSmall * 100.0f));
@@ -562,10 +554,6 @@ INT_PTR CALLBACK VideoTab::SetupDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 
 		case IDC_DEMAND:
 			SendDlgItemMessageA(hWnd, IDC_SRFPRELOAD, BM_SETCHECK, BST_UNCHECKED, 0);
-			break;
-
-		case IDC_ROCK_ENABLE:
-			Config->bRockEnable = (int)SendDlgItemMessage(hWnd, IDC_ROCK_ENABLE, BM_GETCHECK, 0, 0);
 			break;
 
 		case IDC_ROCK_SHADOWS:
@@ -827,21 +815,6 @@ void VideoTab::InitSetupDialog(HWND hWnd)
 	SendDlgItemMessage(hWnd, IDC_LODBIAS,     TBM_SETPOS, 1, int(Config->LODBias*5.0));
 	SendDlgItemMessage(hWnd, IDC_MICROBIAS,   TBM_SETPOS, 1, int(Config->MicroBias));
 
-	SendDlgItemMessage(hWnd, IDC_ROCK_DENSITY, TBM_SETRANGEMIN, 1, 1);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DENSITY, TBM_SETRANGEMAX, 1, 30);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DENSITY, TBM_SETTICFREQ, 5, 0);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DENSITY, TBM_SETPOS, 1, int(Config->fRockDensityMult * 10.0f));
-
-	SendDlgItemMessage(hWnd, IDC_ROCK_DIST, TBM_SETRANGEMIN, 1, 1);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DIST, TBM_SETRANGEMAX, 1, 200);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DIST, TBM_SETTICFREQ, 10, 0);
-	SendDlgItemMessage(hWnd, IDC_ROCK_DIST, TBM_SETPOS, 1, int(Config->fRockMaxDist / 100.0f));
-
-	sprintf_s(cbuf, 32, "%.1fx", Config->fRockDensityMult);
-	SetWindowTextA(GetDlgItem(hWnd, IDC_ROCK_DENSITY_TXT), cbuf);
-	sprintf_s(cbuf, 32, "%dm", (int)Config->fRockMaxDist);
-	SetWindowTextA(GetDlgItem(hWnd, IDC_ROCK_DIST_TXT), cbuf);
-
 	SendDlgItemMessage(hWnd, IDC_ROCK_DIST_SMALL, TBM_SETRANGEMIN, 1, 0);
 	SendDlgItemMessage(hWnd, IDC_ROCK_DIST_SMALL, TBM_SETRANGEMAX, 1, 100);
 	SendDlgItemMessage(hWnd, IDC_ROCK_DIST_SMALL, TBM_SETTICFREQ, 10, 0);
@@ -898,9 +871,11 @@ void VideoTab::InitSetupDialog(HWND hWnd)
 	SendDlgItemMessage(hWnd, IDC_EIRRAD, BM_SETCHECK, Config->bIrradiance == 1, 0);
 	SendDlgItemMessage(hWnd, IDC_ESCACHE, BM_SETCHECK, Config->ShaderCacheUse == 1, 0);
 	SendDlgItemMessage(hWnd, IDC_EAQUALITY, BM_SETCHECK, Config->bAtmoQuality == 1, 0);
-	SendDlgItemMessage(hWnd, IDC_ROCK_ENABLE, BM_SETCHECK, Config->bRockEnable == 1, 0);
+
 	SendDlgItemMessage(hWnd, IDC_ROCK_SHADOWS, BM_SETCHECK, Config->bRockShadows == 1, 0);
-	SendDlgItemMessage(hWnd, IDC_ROCK_COLLISION, BM_SETCHECK, Config->bRockCollision == 1, 0);
+	SendDlgItemMessage(hWnd, IDC_SHOW_ROCK_COL, BM_SETCHECK, Config->bShowRockColliders == 1, 0);
+	SendDlgItemMessage(hWnd, IDC_SHOW_BASE_COL, BM_SETCHECK, Config->bShowBaseColliders == 1, 0);
+	SendDlgItemMessage(hWnd, IDC_SHOW_VESSEL_COL, BM_SETCHECK, Config->bShowVesselColliders == 1, 0);
 
 
 	SendDlgItemMessage(hWnd, IDC_NORMALMAPS, BM_SETCHECK, Config->UseNormalMap==1, 0);
@@ -987,14 +962,13 @@ void VideoTab::SaveSetupState(HWND hWnd)
 	Config->Separation	  = double(SendDlgItemMessage(hWnd, IDC_SEPARATION,  TBM_GETPOS, 0, 0));
 	Config->LODBias       = 0.2 * double(SendDlgItemMessage(hWnd, IDC_LODBIAS,  TBM_GETPOS, 0, 0));
 	Config->MicroBias     = int(SendDlgItemMessage(hWnd, IDC_MICROBIAS,  TBM_GETPOS, 0, 0));
-	Config->fRockDensityMult = (float)SendDlgItemMessage(hWnd, IDC_ROCK_DENSITY, TBM_GETPOS, 0, 0) / 10.0f;
-	Config->fRockMaxDist     = (float)SendDlgItemMessage(hWnd, IDC_ROCK_DIST, TBM_GETPOS, 0, 0) * 100.0f;
 	Config->fRockDistSmall   = (float)SendDlgItemMessage(hWnd, IDC_ROCK_DIST_SMALL, TBM_GETPOS, 0, 0) / 100.0f;
 	Config->fRockDistMedium  = (float)SendDlgItemMessage(hWnd, IDC_ROCK_DIST_MEDIUM, TBM_GETPOS, 0, 0) / 100.0f;
 	Config->fRockDistLarge   = (float)SendDlgItemMessage(hWnd, IDC_ROCK_DIST_LARGE, TBM_GETPOS, 0, 0) / 100.0f;
-	Config->bRockEnable   = (int)SendDlgItemMessage(hWnd, IDC_ROCK_ENABLE, BM_GETCHECK, 0, 0);
 	Config->bRockShadows  = (int)SendDlgItemMessage(hWnd, IDC_ROCK_SHADOWS, BM_GETCHECK, 0, 0);
-	Config->bRockCollision= (int)SendDlgItemMessage(hWnd, IDC_ROCK_COLLISION, BM_GETCHECK, 0, 0);
+	Config->bShowRockColliders = (int)SendDlgItemMessage(hWnd, IDC_SHOW_ROCK_COL, BM_GETCHECK, 0, 0);
+	Config->bShowBaseColliders = (int)SendDlgItemMessage(hWnd, IDC_SHOW_BASE_COL, BM_GETCHECK, 0, 0);
+	Config->bShowVesselColliders = (int)SendDlgItemMessage(hWnd, IDC_SHOW_VESSEL_COL, BM_GETCHECK, 0, 0);
 
 	// Other things
 	GetWindowText(GetDlgItem(hWnd, IDC_HZ),  cbuf, 32);

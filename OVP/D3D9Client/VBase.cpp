@@ -458,10 +458,13 @@ void vBase::RenderRunwayLights(LPDIRECT3DDEVICE9 dev)
 	if (DebugControls::IsActive()) {
 		DWORD flags = *(DWORD*)gc->GetConfigParam(CFGPRM_GETDEBUGFLAGS);
 		if (flags&DBG_FLAGS_SELVISONLY && this!=DebugControls::GetVisual()) return; // Used for debugging
-		if (flags&DBG_FLAGS_BOXES) {
+		if (flags&DBG_FLAGS_BOXES || Config->bShowBaseColliders) {
 			D3DXMATRIX id;
 			D3D9Effect::RenderBoundingBox(&mWorld, D3DXMatrixIdentity(&id), &BBox.min, &BBox.max, ptr(D3DXVECTOR4(1,0,1,0.75f)));
 		}
+	} else if (Config->bShowBaseColliders) {
+		D3DXMATRIX id;
+		D3D9Effect::RenderBoundingBox(&mWorld, D3DXMatrixIdentity(&id), &BBox.min, &BBox.max, ptr(D3DXVECTOR4(1,0,1,0.75f)));
 	}
 }
 

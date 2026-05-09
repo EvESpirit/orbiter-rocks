@@ -36,6 +36,9 @@
 #include "Dialogs.h"
 #include "State.h"
 #include "Util.h"
+#include "Planet.h"
+#include "RockScatter.h"
+#include "Mesh.h"
 #include "elevmgr.h"
 #include <fstream>
 #include <iomanip>
@@ -4708,8 +4711,8 @@ bool Vessel::AddSurfaceForces (Vector *F, Vector *M, const StateVectors *s, doub
 
 // Extracts vertices from all visual meshes into vessel-local coords.
 // Only rebuilds when mesh count changes.
-
 void Vessel::RebuildHullCache() {
+
   if (m_hullCacheMeshCount == nmesh)
     return; // cache is up to date
   m_hullCache.clear();
@@ -4730,8 +4733,8 @@ void Vessel::RebuildHullCache() {
       if (!grp || !grp->Vtx)
         continue;
 
-      // Downsample: use every 4th vertex for dense meshes
-      DWORD step = (grp->nVtx > 100) ? 4 : 1;
+      // Downsample: use every 8th vertex for dense meshes, 16th for very dense
+      DWORD step = (grp->nVtx > 1000) ? 16 : (grp->nVtx > 100 ? 8 : 1);
       for (DWORD v = 0; v < grp->nVtx; v += step) {
         VECTOR3 pt;
         pt.x = grp->Vtx[v].x + meshOfs.x;
@@ -4742,6 +4745,286 @@ void Vessel::RebuildHullCache() {
     }
   }
   m_hullCacheMeshCount = nmesh;
+}
+
+void Vessel::CheckBaseCollisions(Planet *pp) {
+	if (!pp) return;
+	UpdateHullCacheP();
+	if (m_hullCacheP.empty()) return;
+
+	Vector localPosV(s1->pos - pp->s1->pos);
+	localPosV.Set(tmul(pp->s1->R, localPosV));
+
+	Matrix V2P;
+	V2P.Set(s1->R);
+	V2P.tpremul(pp->s1->R);
+
+	VECTOR3 vPosP = { (float)localPosV.x, (float)localPosV.y, (float)localPosV.z };
+
+	for (DWORD i = 0; i < pp->nBase(); i++) {
+		Base *base = pp->GetBase(i);
+		if (!base) continue;
+
+		Vector basePosV(base->s1->pos - pp->s1->pos);
+		basePosV.Set(tmul(pp->s1->R, basePosV));
+		double dist2 = (localPosV - basePosV).length2();
+		if (dist2 > 2000.0 * 2000.0) continue;
+
+		Matrix M_b2p;
+		M_b2p.Set(base->s1->R);
+		M_b2p.tpremul(pp->s1->R);
+
+		Mesh **m_us, **m_os;
+		DWORD n_us, n_os;
+		base->ExportBaseStructures(&m_us, &n_us, &m_os, &n_os);
+
+		BaseCollisionResult bestRes;
+		bestRes.hit = false;
+		bestRes.depth = 0;
+
+		VECTOR3 bPosP = { (float)basePosV.x, (float)basePosV.y, (float)basePosV.z };
+		auto checkMeshList = [&](Mesh **mlist, DWORD n) {
+			for (DWORD m = 0; m < n; m++) {
+				BaseCollisionResult res;
+				if (CheckMeshCollision(mlist[m], M_b2p, bPosP, res)) {
+					if (!bestRes.hit || res.depth > bestRes.depth) {
+						bestRes = res;
+					}
+				}
+			}
+		};
+
+		checkMeshList(m_us, n_us);
+		checkMeshList(m_os, n_os);
+
+		if (bestRes.hit) {
+			Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
+			Vector normGlobal = mul(pp->s1->R, norm);
+			s1->pos += normGlobal * (bestRes.depth * 0.9);
+			rpos_base = s1->pos;
+			rpos_add.Set(0, 0, 0);
+			double v_rel_norm = dotp(s1->vel - base->s1->vel, normGlobal);
+			if (v_rel_norm < 0.0) {
+				s1->vel -= normGlobal * (v_rel_norm * 1.1);
+				rvel_base = s1->vel;
+				rvel_add.Set(0, 0, 0);
+			}
+		}
+	}
+}
+
+bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &meshPosPlanet, BaseCollisionResult &res) {
+	if (!m || m_hullCacheP.empty()) return false;
+	res.hit = false;
+	double deepestPen = 0.0;
+
+	Vector mPosP(meshPosPlanet.x, meshPosPlanet.y, meshPosPlanet.z);
+	
+	// Pre-transform hull points to mesh-local frame
+	// This eliminates matrix multiplications in the triangle loop
+	std::vector<Vector> hullM;
+	hullM.reserve(m_hullCacheP.size());
+	Vector hMinM(1e10, 1e10, 1e10), hMaxM(-1e10, -1e10, -1e10);
+
+	for (const auto& hp_v : m_hullCacheP) {
+		Vector hp_p(hp_v.x, hp_v.y, hp_v.z);
+		Vector hp_m = tmul(M_mesh2planet, hp_p - mPosP);
+		hullM.push_back(hp_m);
+		
+		if (hp_m.x < hMinM.x) hMinM.x = hp_m.x;
+		if (hp_m.y < hMinM.y) hMinM.y = hp_m.y;
+		if (hp_m.z < hMinM.z) hMinM.z = hp_m.z;
+		if (hp_m.x > hMaxM.x) hMaxM.x = hp_m.x;
+		if (hp_m.y > hMaxM.y) hMaxM.y = hp_m.y;
+		if (hp_m.z > hMaxM.z) hMaxM.z = hp_m.z;
+	}
+
+	for (DWORD g = 0; g < m->nGroup(); g++) {
+		GroupSpec *grp = const_cast<Mesh*>(m)->GetGroup(g);
+		if (!grp || !grp->Vtx || !grp->Idx) continue;
+
+		for (DWORD i = 0; i < grp->nIdx; i += 3) {
+			const auto& v0_raw = grp->Vtx[grp->Idx[i]];
+			const auto& v1_raw = grp->Vtx[grp->Idx[i+1]];
+			const auto& v2_raw = grp->Vtx[grp->Idx[i+2]];
+
+			// Triangle AABB culling in mesh-local frame
+			double tmin_x = min(v0_raw.x, min(v1_raw.x, v2_raw.x)) - 0.1;
+			double tmax_x = max(v0_raw.x, max(v1_raw.x, v2_raw.x)) + 0.1;
+			if (tmin_x > hMaxM.x || tmax_x < hMinM.x) continue;
+
+			double tmin_y = min(v0_raw.y, min(v1_raw.y, v2_raw.y)) - 0.1;
+			double tmax_y = max(v0_raw.y, max(v1_raw.y, v2_raw.y)) + 0.1;
+			if (tmin_y > hMaxM.y || tmax_y < hMinM.y) continue;
+
+			double tmin_z = min(v0_raw.z, min(v1_raw.z, v2_raw.z)) - 0.1;
+			double tmax_z = max(v0_raw.z, max(v1_raw.z, v2_raw.z)) + 0.1;
+			if (tmin_z > hMaxM.z || tmax_z < hMinM.z) continue;
+
+			Vector p0(v0_raw.x, v0_raw.y, v0_raw.z);
+			Vector p1(v1_raw.x, v1_raw.y, v1_raw.z);
+			Vector p2(v2_raw.x, v2_raw.y, v2_raw.z);
+
+			Vector e1 = p1 - p0;
+			Vector e2 = p2 - p0;
+			Vector n = crossp(e1, e2);
+			double area2 = n.length();
+			if (area2 < 1e-6) continue;
+			n /= area2;
+
+			// Heuristic to ensure normal points OUT of the mesh
+			if (dotp(n, p0) < 0) n = -n;
+
+			for (const auto& hp_m : hullM) {
+				// Hull point AABB check
+				if (hp_m.x < tmin_x || hp_m.x > tmax_x ||
+					hp_m.y < tmin_y || hp_m.y > tmax_y ||
+					hp_m.z < tmin_z || hp_m.z > tmax_z) continue;
+
+				double d = dotp(hp_m - p0, n);
+				if (d > 0.05 || d < -200.0) continue;
+
+				// Barycentric check
+				Vector v2p = hp_m - p0;
+				double d00 = dotp(e1, e1);
+				double d01 = dotp(e1, e2);
+				double d11 = dotp(e2, e2);
+				double d20 = dotp(v2p, e1);
+				double d21 = dotp(v2p, e2);
+				double denom = d00 * d11 - d01 * d01;
+				if (fabs(denom) < 1e-12) continue;
+				double v = (d11 * d20 - d01 * d21) / denom;
+				double w = (d00 * d21 - d01 * d20) / denom;
+				double u = 1.0 - v - w;
+
+				if (u >= -0.05 && v >= -0.05 && w >= -0.05) {
+					double pen = -d;
+					if (pen > deepestPen) {
+						deepestPen = pen;
+						res.hit = true;
+						// Transform normal back to planet frame for response
+						Vector nP = mul(M_mesh2planet, n);
+						res.normal = { (float)nP.x, (float)nP.y, (float)nP.z };
+						res.depth = pen;
+					}
+				}
+			}
+		}
+	}
+	return res.hit;
+}
+
+void Vessel::UpdateHullCacheP() {
+	if (m_hullCachePValid) return;
+	RebuildHullCache();
+	if (m_hullCache.empty() || !proxyplanet) return;
+
+	Matrix V2P;
+	V2P.Set(s1->R);
+	V2P.tpremul(((Planet*)proxyplanet)->s1->R);
+	Vector localPosV(s1->pos - proxyplanet->s1->pos);
+	localPosV.Set(tmul(proxyplanet->s1->R, localPosV));
+
+	m_hullCacheP.resize(m_hullCache.size());
+	m_hullMinP.Set(1e10, 1e10, 1e10);
+	m_hullMaxP.Set(-1e10, -1e10, -1e10);
+
+	for (size_t i = 0; i < m_hullCache.size(); i++) {
+		Vector vp(m_hullCache[i].x, m_hullCache[i].y, m_hullCache[i].z);
+		Vector plv = mul(V2P, vp);
+		m_hullCacheP[i] = { (float)(plv.x + localPosV.x), (float)(plv.y + localPosV.y), (float)(plv.z + localPosV.z) };
+		
+		if (m_hullCacheP[i].x < m_hullMinP.x) m_hullMinP.x = m_hullCacheP[i].x;
+		if (m_hullCacheP[i].y < m_hullMinP.y) m_hullMinP.y = m_hullCacheP[i].y;
+		if (m_hullCacheP[i].z < m_hullMinP.z) m_hullMinP.z = m_hullCacheP[i].z;
+		if (m_hullCacheP[i].x > m_hullMaxP.x) m_hullMaxP.x = m_hullCacheP[i].x;
+		if (m_hullCacheP[i].y > m_hullMaxP.y) m_hullMaxP.y = m_hullCacheP[i].y;
+		if (m_hullCacheP[i].z > m_hullMaxP.z) m_hullMaxP.z = m_hullCacheP[i].z;
+	}
+	m_hullCachePValid = true;
+}
+
+void Vessel::CheckVesselCollisions() {
+	if (!g_pOrbiter->Cfg()->CfgPhysicsPrm.bVesselCollision) return;
+	if (!proxyplanet) return;
+	UpdateHullCacheP();
+	if (m_hullCacheP.empty()) return;
+
+	Planet *pp = (Planet*)proxyplanet;
+
+	for (DWORD i = 0; i < g_psys->nVessel(); i++) {
+		Vessel *v = g_psys->GetVessel(i);
+		Vessel *v_root = v;
+		while (v_root->attach && v_root->attach->mate) v_root = v_root->attach->mate;
+		Vessel *my_root = this;
+		while (my_root->attach && my_root->attach->mate) my_root = my_root->attach->mate;
+		if (v == this || v_root == my_root) continue;
+
+		double dst2 = s1->pos.dist2(v->s1->pos);
+		double rsum = size + v->Size();
+		
+		if (dst2 > (rsum + 5.0) * (rsum + 5.0)) continue;
+
+		Matrix M_other2p;
+		M_other2p.Set(v->s1->R);
+		M_other2p.tpremul(pp->s1->R);
+
+		Vector otherPosV(v->s1->pos - pp->s1->pos);
+		otherPosV.Set(tmul(pp->s1->R, otherPosV));
+
+		BaseCollisionResult bestRes;
+		bestRes.hit = false;
+		bestRes.depth = 0;
+
+		for (DWORD mi = 0; mi < v->nmesh; mi++) {
+			if (!v->meshlist[mi] || !v->meshlist[mi]->hMesh) continue;
+			Mesh *m = (Mesh*)v->meshlist[mi]->hMesh;
+
+			Vector meshOfsP = mul(M_other2p, Vector(v->meshlist[mi]->meshofs.x, v->meshlist[mi]->meshofs.y, v->meshlist[mi]->meshofs.z));
+			VECTOR3 mPosP = { (float)(otherPosV.x + meshOfsP.x), (float)(otherPosV.y + meshOfsP.y), (float)(otherPosV.z + meshOfsP.z) };
+
+			BaseCollisionResult res;
+			if (CheckMeshCollision(m, M_other2p, mPosP, res)) {
+				if (!bestRes.hit || res.depth > bestRes.depth) {
+					bestRes = res;
+				}
+			}
+		}
+
+		if (bestRes.hit) {
+			Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
+			Vector normGlobal = mul(pp->s1->R, norm);
+			
+			// Resolve 100% of penetration (active push-out)
+			Vector deltaPos = normGlobal * (bestRes.depth * 1.0);
+			Vector deltaVel(0,0,0);
+
+			double v_rel_norm = dotp(my_root->s1->vel - v_root->s1->vel, normGlobal);
+			if (v_rel_norm < 0.0) {
+				// Kill 100% of relative velocity and add a small bounce
+				deltaVel = normGlobal * (v_rel_norm * 1.05);
+			}
+
+			// Apply changes to the ENTIRE stack and sync surface parameters
+			// This prevents landed vessels from "snapping back" to their old equatorial coords
+			for (DWORD j = 0; j < g_psys->nVessel(); j++) {
+				Vessel *vj = g_psys->GetVessel(j);
+				Vessel *vj_root = vj;
+				while (vj_root->attach && vj_root->attach->mate) vj_root = vj_root->attach->mate;
+				
+				if (vj_root == my_root) {
+					vj->s1->pos += deltaPos;
+					vj->rpos_base += deltaPos;
+					vj->s1->vel -= deltaVel;
+					vj->rvel_base -= deltaVel;
+					vj->UpdateSurfParams();
+				}
+			}
+
+			// Force hull cache refresh if we moved significantly
+			m_hullCachePValid = false;
+		}
+	}
 }
 
 // =======================================================================
@@ -4808,8 +5091,10 @@ void Vessel::Update (bool force)
 	if (proxyplanet && fstatus != FLIGHTSTATUS_LANDED && !bFRplayback) {
 
 		// mesh-to-mesh collision using cached hull vertices
-		if (sp.alt < 2.0 * size) {
-			if (auto gc = g_pOrbiter->GetGraphicsClient()) {
+		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bRockCollision && sp.alt < 2.0 * size) {
+			Planet *pp = (Planet*)proxyplanet;
+			RockScatter *rs = pp->GetRockScatter();
+			if (rs) {
 				// Rebuild hull cache if meshes changed (noop if not)
 				RebuildHullCache();
 
@@ -4833,9 +5118,9 @@ void Vessel::Update (bool force)
 										   plv.z + localPosV.z};
 					}
 
-					auto hitRes = gc->clbkCheckRockCollision(
-						(OBJHANDLE)proxyplanet, hullPtsWorld.data(),
-						(int)hullPtsWorld.size(), localPos, size);
+					auto hitRes = rs->CheckCollision(
+						hullPtsWorld.data(),
+						(int)hullPtsWorld.size(), localPos, size, 100.0f);
 
 					if (hitRes.hit) {
 						// Collision normal: rock center -> vessel CoM direction, to global
@@ -4873,6 +5158,21 @@ void Vessel::Update (bool force)
 					}
 				}
 			}
+		}
+
+		// base-to-vessel mesh collision
+		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bBaseCollision && sp.alt < 5.0 * size) {
+			CheckBaseCollisions((Planet*)proxyplanet);
+		}
+
+	}
+
+	if (proxyplanet && !bFRplayback) {
+		m_hullCachePValid = false; // reset cache for this frame
+
+		// vessel-to-vessel collision (before landed logic)
+		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bVesselCollision) {
+			CheckVesselCollisions();
 		}
 
 		// handle planetary surface touchdown events
@@ -5014,7 +5314,7 @@ void Vessel::Update (bool force)
 
 	// state vectors w.r.t. reference body
 	cpos = s1->pos - cbody->s1->pos;
- 	cvel = s1->vel - cbody->s1->vel;
+	cvel = s1->vel - cbody->s1->vel;
 
 	// module interface calls
 	if (hVis && animcount) {

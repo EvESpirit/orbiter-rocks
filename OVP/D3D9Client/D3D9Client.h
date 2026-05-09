@@ -1034,7 +1034,7 @@ public:
 	 */
 	bool clbkFilterElevation(OBJHANDLE hPlanet, int ilat, int ilng, int lvl, double elev_res, INT16* elev);
 
-	SurfaceCollisionResult clbkCheckRockCollision(OBJHANDLE hPlanet, const VECTOR3* hullPtsLocal, int nPts, const VECTOR3& vesselPosLocal, double vesselRadius) const override;
+
 	// @}
 
 	void clbkImGuiNewFrame() override;

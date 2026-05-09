@@ -1,3 +1,5 @@
+#include "D3D9Client.h"
+extern class D3D9Client* g_client;
 // ==============================================================
 // RockScatter.cpp
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
@@ -10,6 +12,7 @@
 #include "OapiExtension.h"
 #include "Scene.h"
 #include "VPlanet.h"
+#include "DebugControls.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -17,6 +20,8 @@
 #include <sstream>
 #include <string>
 
+namespace oapi { class D3D9Client; }
+extern oapi::D3D9Client *g_client;
 // Quality multipliers for rock density: Off / Low / Medium / High
 static const float g_qualityMult[] = {0.0f, 0.25f, 0.6f, 1.0f};
 
@@ -197,9 +202,11 @@ void RockScatter::CreateIcosphereMesh(int subdivisions, UINT seed,
 }
 
 void RockScatter::CreateRockMeshes() {
-  const RockScatterCfg &cfg = m_planet->RockCfg;
+  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+  if (!pCfg) return;
+  const ::RockScatterCfg &cfg = *pCfg;
 
-  if (!cfg.sMeshPrefix.empty()) {
+  if (cfg.sMeshPrefix[0] != '\0') {
     WIN32_FIND_DATAA fd;
     char searchPath[MAX_PATH];
 
@@ -212,8 +219,8 @@ void RockScatter::CreateRockMeshes() {
       *(lastSlash + 1) = '\0';
 
     sprintf_s(searchPath, sizeof(searchPath), "%sMeshes\\%s*.msh", exePath,
-              cfg.sMeshPrefix.c_str());
-    LogAlw("RockScatter: Mesh prefix = '%s'", cfg.sMeshPrefix.c_str());
+              cfg.sMeshPrefix);
+    LogAlw("RockScatter: Mesh prefix = '%s'", cfg.sMeshPrefix);
     LogAlw("RockScatter: Searching for meshes with pattern '%s'", searchPath);
 
     std::vector<std::string> foundFiles;
@@ -229,9 +236,10 @@ void RockScatter::CreateRockMeshes() {
     std::sort(foundFiles.begin(), foundFiles.end());
 
     std::string dirPath = "";
-    size_t slashPos = cfg.sMeshPrefix.find_last_of("\\/");
+    std::string meshPrefixStr(cfg.sMeshPrefix);
+    size_t slashPos = meshPrefixStr.find_last_of("\\/");
     if (slashPos != std::string::npos) {
-      dirPath = cfg.sMeshPrefix.substr(0, slashPos + 1);
+      dirPath = meshPrefixStr.substr(0, slashPos + 1);
     }
 
     for (const auto &fname : foundFiles) {
@@ -260,36 +268,6 @@ void RockScatter::CreateRockMeshes() {
         }
         float bottomExtent = -minY; // positive value = distance below origin
 
-        // Build collision geometry from all mesh groups
-        CollisionGeom cg;
-        cg.maxRadius = 0.0f;
-        for (DWORD cgi = 0; cgi < nGrp; cgi++) {
-          MESHGROUPEX *cgrp = oapiMeshGroupEx(hMesh, cgi);
-          if (cgrp && cgrp->Vtx && cgrp->Idx) {
-            for (DWORD t = 0; t + 2 < cgrp->nIdx; t += 3) {
-              CollisionGeom::Tri tri;
-              WORD i0 = cgrp->Idx[t], i1 = cgrp->Idx[t + 1],
-                   i2 = cgrp->Idx[t + 2];
-              tri.v0 = D3DXVECTOR3(cgrp->Vtx[i0].x, cgrp->Vtx[i0].y,
-                                   cgrp->Vtx[i0].z);
-              tri.v1 = D3DXVECTOR3(cgrp->Vtx[i1].x, cgrp->Vtx[i1].y,
-                                   cgrp->Vtx[i1].z);
-              tri.v2 = D3DXVECTOR3(cgrp->Vtx[i2].x, cgrp->Vtx[i2].y,
-                                   cgrp->Vtx[i2].z);
-              cg.tris.push_back(tri);
-              float r0 = D3DXVec3Length(&tri.v0);
-              float r1 = D3DXVec3Length(&tri.v1);
-              float r2 = D3DXVec3Length(&tri.v2);
-              if (r0 > cg.maxRadius)
-                cg.maxRadius = r0;
-              if (r1 > cg.maxRadius)
-                cg.maxRadius = r1;
-              if (r2 > cg.maxRadius)
-                cg.maxRadius = r2;
-            }
-          }
-        }
-
         D3D9Mesh *d9m = new D3D9Mesh(hMesh, true);
         if (d9m) {
           // Fallback: If Orbiter's mesh parser failed to parse the TEXTURES block (TextureCount <= 1), manually bind it
@@ -314,28 +292,22 @@ void RockScatter::CreateRockMeshes() {
           if (!isSmall && !isMedium && !isLarge) {
             m_meshPool[0].push_back(d9m);
             m_meshBottomExtent[0].push_back(bottomExtent);
-            m_collGeom[0].push_back(cg);
             m_meshPool[1].push_back(d9m);
             m_meshBottomExtent[1].push_back(bottomExtent);
-            m_collGeom[1].push_back(cg);
             m_meshPool[2].push_back(d9m);
             m_meshBottomExtent[2].push_back(bottomExtent);
-            m_collGeom[2].push_back(cg);
           } else {
             if (isSmall) {
               m_meshPool[0].push_back(d9m);
               m_meshBottomExtent[0].push_back(bottomExtent);
-              m_collGeom[0].push_back(cg);
             }
             if (isMedium) {
               m_meshPool[1].push_back(d9m);
               m_meshBottomExtent[1].push_back(bottomExtent);
-              m_collGeom[1].push_back(cg);
             }
             if (isLarge) {
               m_meshPool[2].push_back(d9m);
               m_meshBottomExtent[2].push_back(bottomExtent);
-              m_collGeom[2].push_back(cg);
             }
           }
           LogAlw("RockScatter: Mesh '%s' bottomExtent=%.2f", fname.c_str(),
@@ -356,14 +328,13 @@ void RockScatter::CreateRockMeshes() {
             if (!m_meshPool[j].empty()) {
               m_meshPool[i] = m_meshPool[j];
               m_meshBottomExtent[i] = m_meshBottomExtent[j];
-              m_collGeom[i] = m_collGeom[j];
               break;
             }
           }
         }
       }
       LogAlw("RockScatter: Loaded %u custom meshes with prefix '%s'",
-             foundFiles.size(), cfg.sMeshPrefix.c_str());
+             foundFiles.size(), cfg.sMeshPrefix);
       LogAlw(
           "RockScatter: m_meshPool sizes -> Small: %u, Medium: %u, Large: %u",
           m_meshPool[0].size(), m_meshPool[1].size(), m_meshPool[2].size());
@@ -407,49 +378,29 @@ void RockScatter::CreateRockMeshes() {
 
     D3D9Mesh *procMesh = new D3D9Mesh(&grpex, &mtrl, NULL);
     m_meshPool[i].push_back(procMesh);
-
-    CollisionGeom cg;
-    cg.maxRadius = 0.0f;
-    for (DWORD t = 0; t + 2 < (DWORD)idxs.size(); t += 3) {
-      CollisionGeom::Tri tri;
-      tri.v0 =
-          D3DXVECTOR3(verts[idxs[t]].x, verts[idxs[t]].y, verts[idxs[t]].z);
-      tri.v1 = D3DXVECTOR3(verts[idxs[t + 1]].x, verts[idxs[t + 1]].y,
-                           verts[idxs[t + 1]].z);
-      tri.v2 = D3DXVECTOR3(verts[idxs[t + 2]].x, verts[idxs[t + 2]].y,
-                           verts[idxs[t + 2]].z);
-      cg.tris.push_back(tri);
-      float r0 = D3DXVec3Length(&tri.v0);
-      float r1 = D3DXVec3Length(&tri.v1);
-      float r2 = D3DXVec3Length(&tri.v2);
-      if (r0 > cg.maxRadius)
-        cg.maxRadius = r0;
-      if (r1 > cg.maxRadius)
-        cg.maxRadius = r1;
-      if (r2 > cg.maxRadius)
-        cg.maxRadius = r2;
-    }
-    m_collGeom[i].push_back(cg);
   }
 }
 
 RockScatter::RockScatter(vPlanet *planet, LPDIRECT3DDEVICE9 pDev)
     : m_planet(planet), m_pDev(pDev), m_seed(0),
-      m_lastDensityMult(Config->fRockDensityMult) {
+      m_lastDensityMult(*(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT)) {
   const char *name = planet->GetName();
   uint32_t h = 5381u;
   if (name)
     for (const char *p = name; *p; p++)
       h = h * 33u + (uint32_t)*p;
-  h ^= planet->RockCfg.uSeed;
+  const ::RockScatterCfg *pCfgInit = oapiGetRockScatterCfg(planet->Object());
+  h ^= pCfgInit ? pCfgInit->uSeed : 0u;
   m_seed = h ? h : 1u;
 
   CreateRockMeshes();
   LoadBaseClearZones();
   LogAlw("RockScatter: Initialised for '%s' (seed=%u, drawDist=%.0f m, "
          "density=%.4f, clearZones=%u)",
-         name ? name : "?", m_seed, planet->RockCfg.fDrawDist,
-         planet->RockCfg.fDensity, (unsigned)m_clearZones.size());
+         name ? name : "?", m_seed,
+         pCfgInit ? pCfgInit->fDrawDist : 0.0f,
+         pCfgInit ? pCfgInit->fDensity : 0.0f,
+         (unsigned)m_clearZones.size());
 }
 
 RockScatter::~RockScatter() {
@@ -591,7 +542,8 @@ bool RockScatter::IsInClearZone(double lng, double lat) const {
   return false;
 }
 
-// Deterministic rock generation
+// Fetch rock instances from the core engine via OrbiterAPI.
+// The core owns the authoritative rock generation; we just convert to D3D9 format.
 
 const std::vector<RockScatter::RockInstance> &
 RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
@@ -602,86 +554,35 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
     return it->second;
 
   auto &rocks = m_cache[key];
-  const RockScatterCfg &cfg = m_planet->RockCfg;
 
-  // Compute tile bounds
-  double tileSize = PI / double(1 << lvl);
-  double latMin = PI * 0.5 - tileSize * (ilat + 1);
-  double latMax = PI * 0.5 - tileSize * ilat;
-  double lngMin = -PI + tileSize * ilng;
-  double lngMax = lngMin + tileSize;
+  // Query the core engine for this tile's rock data
+  int nRocks = 0;
+  const ::RockInstance *coreRocks =
+      oapiGetRockScatterTiles(m_planet->Object(), lvl, ilat, ilng, &nRocks);
 
-  // Approximate tile area in m² at this level
-  double planetRad = m_planet->GetSize();
-  double midLat = (latMin + latMax) * 0.5;
-  double areaM2 = (tileSize * planetRad) * (tileSize * cos(midLat) * planetRad);
-  if (areaM2 < 1.0)
+  if (!coreRocks || nRocks <= 0)
     return rocks;
 
-  // Quality-adjusted density
-  if (Config->bRockEnable == 0 || Config->fRockDensityMult <= 0.0f)
-    return rocks;
-  float density = cfg.fDensity * Config->fRockDensityMult;
-
-  int nRocks = (int)(density * areaM2);
-  // cap per tile to keep memory sane
-  if (nRocks > 2000)
-    nRocks = 2000;
-  if (nRocks <= 0)
-    return rocks;
-
-  uint32_t rng = HashTile(m_seed, lvl, ilat, ilng);
   rocks.reserve(nRocks);
 
   for (int i = 0; i < nRocks; i++) {
+    const auto &src = coreRocks[i];
     RockInstance rock;
-
-    // Random position within tile (lat/lng)
-    double lat = latMin + RandFloat(rng) * (latMax - latMin);
-    double lng = lngMin + RandFloat(rng) * (lngMax - lngMin);
-
-    // Unit sphere position
-    double clat = cos(lat), slat = sin(lat);
-    double clng = cos(lng), slng = sin(lng);
     rock.localPos =
-        D3DXVECTOR3(float(clat * clng), float(slat), float(clat * slng));
+        D3DXVECTOR3((float)src.localPos.x, (float)src.localPos.y,
+                    (float)src.localPos.z);
+    rock.elevation = src.elevation;
+    rock.scale = src.scale;
+    rock.rotY = src.rotY;
+    rock.sizeClass = src.sizeClass;
 
-    // Elevation – query the actual terrain elevation
-    double elev = oapiSurfaceElevation(m_planet->Object(), lng, lat);
-    rock.elevation = (float)elev;
-
-    // Size class based on configured ratios
-    float r = RandFloat(rng);
-    if (r < cfg.fRatioSmall) {
-      rock.sizeClass = 0;
-      rock.scale = RandRange(rng, cfg.fSizeSmall[0], cfg.fSizeSmall[1]);
-    } else if (r < cfg.fRatioSmall + cfg.fRatioMedium) {
-      rock.sizeClass = 1;
-      rock.scale = RandRange(rng, cfg.fSizeMedium[0], cfg.fSizeMedium[1]);
-    } else {
-      rock.sizeClass = 2;
-      rock.scale = RandRange(rng, cfg.fSizeLarge[0], cfg.fSizeLarge[1]);
-    }
-
-    // Select a deterministic mesh from the corresponding pool
-    int poolSize = m_meshPool[rock.sizeClass].size();
-    rock.meshIndex = (uint8_t)(RandFloat(rng) * poolSize);
-    if (rock.meshIndex >= poolSize)
-      rock.meshIndex = poolSize - 1;
-
-    // Random Y-rotation
-    rock.rotY = RandFloat(rng) * 6.283185f;
-
-    // clear zone filtering
-    // All RNG values have already been consumed above, so skipping
-    // this rock does NOT alter the deterministic sequence for
-    // subsequent rocks in this tile.
-    if (!m_clearZones.empty()) {
-      double rockLat = asin(rock.localPos.y);
-      double rockLng = atan2(rock.localPos.z, rock.localPos.x);
-      if (IsInClearZone(rockLng, rockLat))
-        continue;
-    }
+    // Remap meshIndex to the D3D9 mesh pool size (core may have different
+    // pool sizes). Clamp to valid range.
+    int poolSize = (int)m_meshPool[rock.sizeClass].size();
+    if (poolSize > 0)
+      rock.meshIndex = src.meshIndex % (uint8_t)poolSize;
+    else
+      rock.meshIndex = 0;
 
     rocks.push_back(rock);
   }
@@ -689,22 +590,25 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   return rocks;
 }
 
+
 // Frame
 
 void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
-  if (Config->bRockEnable == 0)
+  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) == 0)
     return;
   if (m_meshPool[0].empty() && m_meshPool[1].empty() && m_meshPool[2].empty())
     return;
 
   // Invalidate cache dynamically if density multiplier changed
-  if (m_lastDensityMult != Config->fRockDensityMult) {
+  if (m_lastDensityMult != *(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT)) {
     std::lock_guard<std::mutex> lock(m_cacheMutex);
     m_cache.clear();
-    m_lastDensityMult = Config->fRockDensityMult;
+    m_lastDensityMult = *(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT);
   }
 
-  const RockScatterCfg &cfg = m_planet->RockCfg;
+  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+  if (!pCfg) return;
+  const ::RockScatterCfg &cfg = *pCfg;
   const Scene *scn = m_planet->GetScene();
   if (!scn)
     return;
@@ -713,7 +617,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
   if (scn->GetCameraProxyVisual() != m_planet)
     return;
 
-  float activeDrawDist = Config->fRockMaxDist;
+  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST);
   float fov = (float)scn->GetCameraAperture();
 
   // Camera and vessel positions
@@ -769,7 +673,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
   int vesselIlat = (int)((PI * 0.5 - vesselLat) / tileSize);
   int vesselIlng = (int)((vesselLng + PI) / tileSize);
   int nLngBands = 1 << (lvl + 1);
-  int searchR = max(2, min(25, (int)ceil(Config->fRockMaxDist / cfg.fDrawDist * 0.5)));
+  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST) / cfg.fDrawDist * 0.5)));
 
   D3D9Sun sunParams = m_planet->GetObjectAtmoParams(camRel);
   float drawDist2 = activeDrawDist * activeDrawDist;
@@ -837,6 +741,9 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
 
     // Begin batch for this mesh variant — sets up ALL shader state once
     batch.mesh->RenderBatchBegin(&sunParams);
+
+    std::vector<D3DXMATRIX> debugMatrices;
+    bool showColliders = (Config->bShowRockColliders == 1) || (DebugControls::IsActive() && (*(DWORD*)g_client->GetConfigParam(CFGPRM_GETDEBUGFLAGS) & 0x0004));
 
     for (int dlat = -searchR; dlat <= searchR; dlat++) {
       int tilat = vesselIlat + dlat;
@@ -935,21 +842,36 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
           // Only update world matrix + commit + draw
           batch.mesh->RenderBatchInstance(&mWorld);
           renderedRocks++;
+
+          if (showColliders) {
+            debugMatrices.push_back(mWorld);
+          }
         }
       }
     }
 
     batch.mesh->RenderBatchEnd();
+
+    if (!debugMatrices.empty()) {
+      D9BBox *bbox = batch.mesh->GetAABB();
+      for (auto &m : debugMatrices) {
+        D3DXMATRIX id;
+        D3D9Effect::RenderBoundingBox(&m, D3DXMatrixIdentity(&id), &bbox->min,
+                                      &bbox->max, ptr(D3DXVECTOR4(0, 1, 1, 0.75f)));
+      }
+    }
   }
 }
 
 void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
-  if (Config->bRockEnable == 0)
+  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) == 0)
     return;
   if (m_meshPool[0].empty() && m_meshPool[1].empty() && m_meshPool[2].empty())
     return;
 
-  const RockScatterCfg &cfg = m_planet->RockCfg;
+  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+  if (!pCfg) return;
+  const ::RockScatterCfg &cfg = *pCfg;
   const Scene *scn = m_planet->GetScene();
   if (!scn)
     return;
@@ -957,7 +879,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
   if (scn->GetCameraProxyVisual() != m_planet)
     return;
 
-  float activeDrawDist = Config->fRockMaxDist;
+  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST);
   float fov = (float)scn->GetCameraAperture();
 
   VECTOR3 camGlob = scn->GetCameraGPos();
@@ -1014,7 +936,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
   int vesselIlat = (int)((PI * 0.5 - vesselLat) / tileSize);
   int vesselIlng = (int)((vesselLng + PI) / tileSize);
   int nLngBands = 1 << (lvl + 1);
-  int searchR = max(2, min(25, (int)ceil(Config->fRockMaxDist / cfg.fDrawDist * 0.5)));
+  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST) / cfg.fDrawDist * 0.5)));
 
   float drawDist2 = activeDrawDist * activeDrawDist;
   D3DXVECTOR4 param = D9OffsetRange(planetRad, 30e3);
@@ -1167,340 +1089,3 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
   }
 }
 
-// Per-triangle downward raycast through collision mesh
-// Returns the highest Y coordinate at (localX, localZ), or -1e30 if miss
-
-float RockScatter::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
-  float bestY = -1e30f;
-  for (const auto &tri : geom.tris) {
-    // 2D point-in-triangle test on XZ plane using barycentric coordinates
-    float ax = tri.v0.x, az = tri.v0.z;
-    float bx = tri.v1.x, bz = tri.v1.z;
-    float cx = tri.v2.x, cz = tri.v2.z;
-
-    float d00 = (bx - ax) * (bx - ax) + (bz - az) * (bz - az);
-    float d01 = (bx - ax) * (cx - ax) + (bz - az) * (cz - az);
-    float d11 = (cx - ax) * (cx - ax) + (cz - az) * (cz - az);
-    float d20 = (lx - ax) * (bx - ax) + (lz - az) * (bz - az);
-    float d21 = (lx - ax) * (cx - ax) + (lz - az) * (cz - az);
-    float denom = d00 * d11 - d01 * d01;
-    if (fabs(denom) < 1e-12f)
-      continue;
-
-    float v = (d11 * d20 - d01 * d21) / denom;
-    float w = (d00 * d21 - d01 * d20) / denom;
-    float u = 1.0f - v - w;
-
-    if (u >= -0.01f && v >= -0.01f && w >= -0.01f) {
-      // Interpolate Y at this XZ position
-      float y = u * tri.v0.y + v * tri.v1.y + w * tri.v2.y;
-      if (y > bestY)
-        bestY = y;
-    }
-  }
-  return bestY;
-}
-
-double RockScatter::GetElevationModifier(double lng, double lat) const {
-  if (!Config->bRockCollision || Config->bRockEnable == 0)
-    return 0.0;
-  const RockScatterCfg &cfg = m_planet->RockCfg;
-  if (!cfg.bEnabled)
-    return 0.0;
-
-  double planetRad = m_planet->GetSize();
-
-  // Use the same tile level computation as the renderer
-  double tgtTileSize = cfg.fDrawDist * 2.0 / planetRad;
-  int lvl = 1;
-  while ((PI / double(1 << lvl)) > tgtTileSize && lvl < 15)
-    lvl++;
-  if (lvl < 4)
-    lvl = 4;
-
-  double tileSize = PI / double(1 << lvl);
-  int centerIlat = (int)((PI * 0.5 - lat) / tileSize);
-  int centerIlng = (int)((lng + PI) / tileSize);
-  int nLngBands = 1 << (lvl + 1);
-
-  double maxAddedElev = 0.0;
-
-  for (int dlat = -1; dlat <= 1; dlat++) {
-    int tilat = centerIlat + dlat;
-    if (tilat < 0 || tilat >= (1 << lvl))
-      continue;
-
-    for (int dlng = -1; dlng <= 1; dlng++) {
-      int tilng = (centerIlng + dlng + nLngBands) % nLngBands;
-
-      const std::vector<RockInstance> &rocks =
-          GetRocksForTile(lvl, tilat, tilng);
-
-      for (const auto &rock : rocks) {
-        // Quick bounding sphere check first
-        if (rock.meshIndex >= m_collGeom[rock.sizeClass].size())
-          continue;
-        const CollisionGeom &cg = m_collGeom[rock.sizeClass][rock.meshIndex];
-        double boundingR = (double)rock.scale * cg.maxRadius;
-
-        // Get the bottom extent since rendering shifts the mesh up by this
-        // amount so the mesh bottom sits on the surface
-        float bottomOfs = 0.0f;
-        if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
-          bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
-
-        double rockLat = asin(rock.localPos.y);
-        double rockLng = atan2(rock.localPos.z, rock.localPos.x);
-
-        double dLat = lat - rockLat;
-        double dLng = lng - rockLng;
-        while (dLng > PI)
-          dLng -= 2.0 * PI;
-        while (dLng < -PI)
-          dLng += 2.0 * PI;
-
-        // Surface distance from rock center
-        double dx_m = dLng * cos(lat) * planetRad;
-        double dy_m = dLat * planetRad;
-        double dist2 = dx_m * dx_m + dy_m * dy_m;
-
-        if (dist2 > boundingR * boundingR)
-          continue;
-
-        // Transform query point into rock's local mesh space:
-        // 1) Un-rotate by rock.rotY
-        // 2) Un-scale by rock.scale
-        float cosR = cosf(-rock.rotY);
-        float sinR = sinf(-rock.rotY);
-        float localX = (float)((dx_m * cosR + dy_m * sinR) / rock.scale);
-        float localZ = (float)((-dx_m * sinR + dy_m * cosR) / rock.scale);
-
-        // Raycast downward through mesh triangles at this XZ
-        float meshY = RaycastMeshY(cg, localX, localZ);
-        if (meshY > -1e20f) {
-          // This shifts the mesh up by bottomOfs so the bottom
-          // sits on the surface. Ground level in mesh space = -bottomOfs.
-          // Visible height above ground = meshY - (-bottomOfs) = meshY +
-          // bottomOfs
-          double heightAboveGround =
-              ((double)meshY + (double)bottomOfs) * rock.scale;
-          if (heightAboveGround > 0.0 && heightAboveGround > maxAddedElev) {
-            maxAddedElev = heightAboveGround;
-          }
-        }
-      }
-    }
-  }
-
-  return maxAddedElev;
-}
-
-// Mesh-to-mesh collisions
-
-RockScatter::CollisionResult
-RockScatter::CheckCollision(const VECTOR3 *hullPts, int nPts,
-                            const VECTOR3 &vesselPosLocal, double vesselRadius,
-                            float maxCollisionDist) const {
-  CollisionResult result = {false, {0, 0, 0}, 0.0, {0, 0, 0}};
-
-  if (!Config->bRockCollision || nPts <= 0 || !hullPts)
-    return result;
-
-  double planetRad = oapiGetSize(m_planet->Object());
-  if (planetRad < 1.0)
-    return result;
-
-  // Vessel center lat/lng for tile lookup
-  double vLen = sqrt(vesselPosLocal.x * vesselPosLocal.x +
-                     vesselPosLocal.y * vesselPosLocal.y +
-                     vesselPosLocal.z * vesselPosLocal.z);
-  if (vLen < 1.0)
-    return result;
-
-  double vLat = asin(vesselPosLocal.y / vLen);
-  double vLng = atan2(vesselPosLocal.z, vesselPosLocal.x);
-  double vAlt = vLen - planetRad;
-  if (vAlt > 500.0)
-    return result;
-
-  const RockScatterCfg &cfg = m_planet->RockCfg;
-  if (!cfg.bEnabled)
-    return result;
-
-  // Use the same tile level as the renderer
-  float drawDist = cfg.fDrawDist;
-  int lvl = (int)(log2(PI / (drawDist / planetRad)));
-  if (lvl < 1)
-    lvl = 1;
-  if (lvl > 19)
-    lvl = 19;
-
-  int nLat = 1 << lvl;
-  int nLng = 2 * nLat;
-
-  int centerIlat = (int)((PI05 - vLat) * nLat / PI);
-  int centerIlng = (int)((vLng + PI) * nLng / PI2);
-  if (centerIlat < 0)
-    centerIlat = 0;
-  if (centerIlat >= nLat)
-    centerIlat = nLat - 1;
-  centerIlng = ((centerIlng % nLng) + nLng) % nLng;
-
-  // Maximum collision distance — only rocks closer than this are checked
-  double maxCollDist2 = (double)maxCollisionDist * (double)maxCollisionDist;
-
-  int searchR = 2;
-  double deepestPen = 0.0;
-
-  static int collLogCount = 0;
-  bool doLog = (collLogCount % 300 == 0);
-
-  int rocksChecked = 0;
-  int rocksInRange = 0;
-
-  for (int dLat = -searchR; dLat <= searchR; dLat++) {
-    int tilat = centerIlat + dLat;
-    if (tilat < 0 || tilat >= nLat)
-      continue;
-    for (int dLng = -searchR; dLng <= searchR; dLng++) {
-      int tilng = ((centerIlng + dLng) % nLng + nLng) % nLng;
-
-      const auto &rocks = GetRocksForTile(lvl, tilat, tilng);
-
-      for (const auto &rock : rocks) {
-        if (rock.meshIndex >= m_collGeom[rock.sizeClass].size())
-          continue;
-        const CollisionGeom &cg = m_collGeom[rock.sizeClass][rock.meshIndex];
-
-        // Get bottom extent for vertical shift
-        float bottomOfs = 0.0f;
-        if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
-          bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
-
-        // Rock world position (planet-local), shifted up by bottomOfs
-        double rockAlt =
-            planetRad + (double)rock.elevation + (double)bottomOfs * rock.scale;
-        double rockWX = (double)rock.localPos.x * rockAlt;
-        double rockWY = (double)rock.localPos.y * rockAlt;
-        double rockWZ = (double)rock.localPos.z * rockAlt;
-
-        // Distance from vessel center to rock center (double precision)
-        double dx = vesselPosLocal.x - rockWX;
-        double dy = vesselPosLocal.y - rockWY;
-        double dz = vesselPosLocal.z - rockWZ;
-        double dist2Center = dx * dx + dy * dy + dz * dz;
-
-        // Only collide with rocks that are WITHIN the collision distance
-        if (dist2Center > maxCollDist2)
-          continue;
-        rocksInRange++;
-
-        double distCenter = sqrt(dist2Center);
-        double rockBoundR = (double)rock.scale * cg.maxRadius;
-        if (distCenter > vesselRadius + rockBoundR + 5.0)
-          continue;
-        rocksChecked++;
-
-        // Build rock's local coordinate frame
-        D3DXVECTOR3 up = Norm3(rock.localPos);
-        D3DXVECTOR3 right, fwd;
-        if (fabsf(up.y) < 0.99f)
-          right = Norm3(D3DXVECTOR3(-up.z, 0, up.x));
-        else
-          right = D3DXVECTOR3(1, 0, 0);
-        D3DXVec3Cross(&fwd, &up, &right);
-
-        float cy = cosf(rock.rotY), sy = sinf(rock.rotY);
-        D3DXVECTOR3 rr = right * cy + fwd * sy;
-        D3DXVECTOR3 ff = fwd * cy - right * sy;
-
-        float invScale = 1.0f / rock.scale;
-
-        // Test each hull vertex
-        for (int p = 0; p < nPts; p++) {
-          // Vector from rock center to hull point
-          double hx = hullPts[p].x - rockWX;
-          double hy = hullPts[p].y - rockWY;
-          double hz = hullPts[p].z - rockWZ;
-
-          // Quick sphere rejection per-point
-          double ptDist2 = hx * hx + hy * hy + hz * hz;
-          if (ptDist2 > rockBoundR * rockBoundR)
-            continue;
-
-          // Transform to rock mesh-local coordinates
-          // Dot products with rock axes
-          float localX = (float)(hx * (double)rr.x + hy * (double)rr.y +
-                                 hz * (double)rr.z) *
-                         invScale;
-          float localY = (float)(hx * (double)up.x + hy * (double)up.y +
-                                 hz * (double)up.z) *
-                         invScale;
-          float localZ = (float)(hx * (double)ff.x + hy * (double)ff.y +
-                                 hz * (double)ff.z) *
-                         invScale;
-
-          // Raycast downward through mesh triangles at this XZ
-          float meshY = RaycastMeshY(cg, localX, localZ);
-          if (meshY <= -1e20f)
-            continue; // outside mesh footprint
-
-          // Point must be above mesh bottom
-          if (localY < -bottomOfs)
-            continue;
-
-          if (localY < meshY) {
-            // Point is inside the rock mesh, so penetration = meshY - localY
-            double pen = ((double)meshY - (double)localY) * rock.scale;
-            if (pen > deepestPen) {
-              deepestPen = pen;
-              result.hit = true;
-
-              // Store the actual hull contact point in planet-local frame
-              result.contactPtLocal = hullPts[p];
-
-              // Push-out normal: direction from rock center to vessel CoM.
-              // This always pushes the vessel AWAY from the rock regardless
-              // of impact angle. Using the rock's up vector caused "climbing"
-              // because side impacts were pushed upward instead of back. This
-              // isn't great but it's all I've got.
-              double toVLen = distCenter;
-              if (toVLen > 1e-6) {
-                result.normal.x = dx / toVLen;
-                result.normal.y = dy / toVLen;
-                result.normal.z = dz / toVLen;
-              } else {
-                result.normal.x = (double)up.x;
-                result.normal.y = (double)up.y;
-                result.normal.z = (double)up.z;
-              }
-
-              // Depth: use the minimum of mesh penetration and the
-              // bounding sphere overlap along the push-out direction.
-              // The mesh depth (meshY - localY) is measured along the
-              // up-axis and can be huge for side impacts. The sphere
-              // overlap gives a physically reasonable push-out distance
-              // for the rock-center-to-vessel direction.
-              double sphereOverlap = rockBoundR - sqrt(ptDist2);
-              if (sphereOverlap > 0)
-                result.depth = min(pen, sphereOverlap);
-              else
-                result.depth = min(pen, 0.01); // just barely inside
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if (doLog || result.hit) {
-    collLogCount++;
-    LogAlw("RockCollision::CheckCollision: nPts=%d rocksInRange=%d "
-           "rocksChecked=%d hit=%d depth=%.4f",
-           nPts, rocksInRange, rocksChecked, result.hit ? 1 : 0, result.depth);
-  } else {
-    collLogCount++;
-  }
-
-  return result;
-}

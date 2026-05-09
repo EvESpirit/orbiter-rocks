@@ -813,12 +813,17 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 	if (scn->GetRenderPass() == RENDERPASS_MAINSCENE) {
 		if (DebugControls::IsActive()) {
 			if (flags&DBG_FLAGS_SELVISONLY && this != DebugControls::GetVisual()) return true;
-			if (flags&DBG_FLAGS_BOXES && !internalpass) {
+			if ((flags&DBG_FLAGS_BOXES || Config->bShowVesselColliders) && !internalpass) {
 				D3DXMATRIX id;
 				D3D9Effect::RenderBoundingBox(&mWorld, D3DXMatrixIdentity(&id), &BBox.min, &BBox.max, ptr(D3DXVECTOR4(1, 0, 0, 0.75f)));
 			}
 
 			RenderLightCone(&mWorld);
+		} else {
+			if (Config->bShowVesselColliders && !internalpass) {
+				D3DXMATRIX id;
+				D3D9Effect::RenderBoundingBox(&mWorld, D3DXMatrixIdentity(&id), &BBox.min, &BBox.max, ptr(D3DXVECTOR4(1, 0, 0, 0.75f)));
+			}
 		}
 	}
 

@@ -21,9 +21,12 @@
 #include "Nav.h"
 #include "GraphicsAPI.h"
 #include "Orbiter.h"
+#include "OrbiterAPI.h"
 #include <functional>
 #include <filesystem>
 namespace fs = std::filesystem;
+
+class RockScatter;
 
 #define FILETYPE_MARKER 1
 
@@ -90,6 +93,9 @@ public:
 	void Setup ();
 
 	int Type() const { return OBJTP_PLANET; }
+
+	RockScatterCfg RockCfg;
+	RockScatter *GetRockScatter() const { return m_rockScatter; }
 
 	const void *GetParam (DWORD paramtype) const;
 
@@ -301,6 +307,8 @@ private:
 	TileManager2<CloudTile> *cmgr2;   // cloud layer manager
 	ElevationManager *emgr;           // elevation manager
 	double elev_res;                  // target elevation resolution [m]
+
+	RockScatter *m_rockScatter;       // core rock scatter system (owned)
 };
 
 #endif // !__PLANET_H

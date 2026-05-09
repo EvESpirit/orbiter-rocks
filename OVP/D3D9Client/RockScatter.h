@@ -27,21 +27,8 @@
 
 class vPlanet;
 
-// Per-planet configuration (parsed from the planet's .cfg file)
-
-struct RockScatterCfg {
-  bool bEnabled;           // Master enable
-  float fDrawDist;         // Max draw distance in metres (default 500)
-  float fDensity;          // Rocks per square metre      (default 0.01)
-  UINT uSeed;              // Base seed (0 = derive from planet name hash)
-  float fSizeSmall[2];     // Min / max scale for small rocks   {0.1, 0.5}
-  float fSizeMedium[2];    // Min / max scale for medium rocks  {0.5, 2.0}
-  float fSizeLarge[2];     // Min / max scale for large rocks   {2.0, 8.0}
-  float fRatioSmall;       // Proportion of small  rocks (0.70)
-  float fRatioMedium;      // Proportion of medium rocks (0.25)
-  float fRatioLarge;       // Proportion of large  rocks (0.05)
-  std::string sMeshPrefix; // Optional custom mesh prefix for procedural loading
-};
+// RockScatterCfg is now defined in OrbiterAPI.h (core engine).
+// The D3D9 client uses the core's definition via oapiGetRockScatterCfg().
 
 // Scatter renderer
 
@@ -56,20 +43,7 @@ public:
   /// Called from vPlanet::RenderBaseShadows().
   void RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha);
 
-  double GetElevationModifier(double lng, double lat) const;
 
-  /// 3D bounding-sphere collision check for mesh-accurate collisions
-  struct CollisionResult {
-    bool hit;
-    VECTOR3 normal; // mesh surface normal in planet-local frame, points away
-                    // from rock
-    double depth;   // penetration depth in metres
-    VECTOR3 contactPtLocal; // deepest contact point in planet-local frame
-  };
-  CollisionResult CheckCollision(const VECTOR3 *hullPtsLocal, int nPts,
-                                 const VECTOR3 &vesselPosLocal,
-                                 double vesselRadius,
-                                 float maxCollisionDist) const;
 
 private:
   // One rock instance inside a tile
@@ -134,19 +108,9 @@ private:
   vPlanet *m_planet;
   LPDIRECT3DDEVICE9 m_pDev;
 
-  // Per-mesh collision geometry (triangles stored as position-only)
-  struct CollisionGeom {
-    struct Tri {
-      D3DXVECTOR3 v0, v1, v2;
-    };
-    std::vector<Tri> tris;
-    float maxRadius; // bounding sphere radius (model space)
-  };
-
   // Meshes used for the 3 size classes (0=Small, 1=Medium, 2=Large)
   std::vector<D3D9Mesh *> m_meshPool[3];
   std::vector<float> m_meshBottomExtent[3];
-  std::vector<CollisionGeom> m_collGeom[3]; // parallel to m_meshPool
 
   // Cached per-tile rock lists
   mutable std::mutex m_cacheMutex;
@@ -161,11 +125,7 @@ private:
   // Base clear zones loaded from all surface base configs on this planet
   std::vector<ClearZone> m_clearZones;
 
-  /// Raycast downward through a rock's collision mesh.
-  /// Returns the highest mesh Y coordinate at the given local XZ position,
-  /// or -1e30 if the point is outside all triangles.
-  static float RaycastMeshY(const CollisionGeom &geom, float localX,
-                            float localZ);
+
 };
 
 #endif // !__ROCKSCATTER_H

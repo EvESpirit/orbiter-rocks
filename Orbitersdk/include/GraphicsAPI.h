@@ -268,6 +268,9 @@ typedef void *HDC;
   *   DWORD
   */
 #define CFGPRM_SURFMARKERFLAG 0x0026
+#define CFGPRM_SURFACEROCKS   0x0027
+#define CFGPRM_ROCKMAXDIST    0x0028
+#define CFGPRM_ROCKDENSITYMULT 0x0029
 /// @}
 
 /**
@@ -1478,28 +1481,7 @@ public:
 	 */
 	virtual bool clbkFilterElevation(OBJHANDLE hPlanet, int ilat, int ilng, int lvl, double elev_res, INT16* elev) { return false; }
 
-	/**
-	 * \brief Result of a surface rock collision query
-	 */
-	struct SurfaceCollisionResult {
-		bool    hit;            ///< true if a collision was detected
-		VECTOR3 normal;         ///< collision surface normal in planet-local frame (points away from rock)
-		double  depth;          ///< penetration depth [m]
-		VECTOR3 contactPtLocal; ///< deepest contact point in planet-local frame (for torque calculation)
-	};
 
-	/**
-	 * \brief Check for mesh-accurate rock collision
-	 * \param hPlanet planet handle
-	 * \param hullPtsLocal array of vessel hull vertices in planet-local frame
-	 * \param nPts number of hull vertices
-	 * \param vesselPosLocal vessel centre position in planet-local frame (for quick rejection)
-	 * \param vesselRadius vessel bounding sphere radius [m]
-	 * \return collision result with normal and penetration depth
-	 */
-	virtual SurfaceCollisionResult clbkCheckRockCollision(OBJHANDLE hPlanet, const VECTOR3* hullPtsLocal, int nPts, const VECTOR3& vesselPosLocal, double vesselRadius) const {
-		return { false, {0,0,0}, 0.0, {0,0,0} };
-	}
 	// @}
 
 	virtual void clbkImGuiNewFrame () = 0;

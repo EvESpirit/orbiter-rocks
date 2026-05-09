@@ -200,6 +200,13 @@ struct FRecord_att {      // flight recorder attitude sample
 	Quaternion q;             // orientation
 };
 
+struct BaseCollisionResult {
+    bool hit;
+    VECTOR3 normal;
+    double depth;
+    VECTOR3 contactPtLocal;
+};
+
 // =======================================================================
 // Module interface methods
 
@@ -1712,7 +1719,14 @@ private:
 	// Hull vertex cache for rock collision (vessel-local coords)
 	std::vector<VECTOR3> m_hullCache;   // cached hull vertices in vessel-local frame
 	UINT m_hullCacheMeshCount;          // nmesh when cache was last built
+	std::vector<VECTOR3> m_hullCacheP;  // hull points in planet-local frame
+	Vector m_hullMinP, m_hullMaxP;      // AABB of hull points in planet-local frame
+	bool m_hullCachePValid;             // true if m_hullCacheP is valid for current frame
 	void RebuildHullCache();            // (re)build m_hullCache from meshlist
+	void UpdateHullCacheP();            // update m_hullCacheP from m_hullCache
+	void CheckBaseCollisions(class Planet *pp);
+	void CheckVesselCollisions();
+	bool CheckMeshCollision(const class Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &vPosPlanet, BaseCollisionResult &res);
 
 	UINT exhaust_id;   // next exhaust id to attach
 

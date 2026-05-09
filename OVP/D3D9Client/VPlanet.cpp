@@ -1,3 +1,5 @@
+#include "D3D9Client.h"
+extern class D3D9Client* g_client;
 // ==============================================================
 // VPlanet.cpp
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
@@ -368,19 +370,6 @@ vPlanet::vPlanet (OBJHANDLE _hObj, const Scene *scene) :
 {
 	memset(&MicroCfg, 0, sizeof(MicroCfg));
 
-	// RockScatter defaults — cannot memset RockCfg because it contains std::string
-	RockCfg.bEnabled      = false;
-	RockCfg.fDrawDist     = 500.0f;
-	RockCfg.fDensity      = 0.01f;
-	RockCfg.uSeed         = 0;
-	RockCfg.fSizeSmall[0] = 0.1f;  RockCfg.fSizeSmall[1]  = 0.5f;
-	RockCfg.fSizeMedium[0]= 0.5f;  RockCfg.fSizeMedium[1] = 2.0f;
-	RockCfg.fSizeLarge[0] = 2.0f;  RockCfg.fSizeLarge[1]  = 8.0f;
-	RockCfg.fRatioSmall   = 0.70f;
-	RockCfg.fRatioMedium  = 0.25f;
-	RockCfg.fRatioLarge   = 0.05f;
-	RockCfg.sMeshPrefix.clear();
-
 	rockScatter = NULL;
 	vRefPoint = _V(1,0,0);
 	atm_mode = 0;
@@ -635,63 +624,8 @@ bool vPlanet::ParseConfig(const char* fname)
 				>> albedo.z;
 		}
 
-		// SurfaceRocks = TRUE/FALSE
-		if (startsWith(line, "SurfaceRocks"))
-		{
-			RockCfg.bEnabled = (line.find("TRUE") != std::string::npos || line.find("true") != std::string::npos || line.find("1") != std::string::npos);
-		}
-		// RockDrawDist = <float>
-		if (startsWith(line, "RockDrawDist"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fDrawDist;
-		}
-		// RockDensity = <float>
-		if (startsWith(line, "RockDensity"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fDensity;
-		}
-		// RockSeed = <uint>
-		if (startsWith(line, "RockSeed"))
-		{
-			int v = 0;
-			std::istringstream iss(line); iss >> dummy >> dummy >> v;
-			RockCfg.uSeed = (UINT)v;
-		}
-		// RockSizeSmall = <float> <float>
-		if (startsWith(line, "RockSizeSmall"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fSizeSmall[0] >> RockCfg.fSizeSmall[1];
-		}
-		// RockSizeMedium = <float> <float>
-		if (startsWith(line, "RockSizeMedium"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fSizeMedium[0] >> RockCfg.fSizeMedium[1];
-		}
-		// RockSizeLarge = <float> <float>
-		if (startsWith(line, "RockSizeLarge"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fSizeLarge[0] >> RockCfg.fSizeLarge[1];
-		}
-		// RockRatioSmall = <float>
-		if (startsWith(line, "RockRatioSmall"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fRatioSmall;
-		}
-		// RockRatioMedium = <float>
-		if (startsWith(line, "RockRatioMedium"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fRatioMedium;
-		}
-		// RockRatioLarge = <float>
-		if (startsWith(line, "RockRatioLarge"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.fRatioLarge;
-		}
-		// RockMesh = <string>
-		if (startsWith(line, "RockMesh"))
-		{
-			std::istringstream iss(line); iss >> dummy >> dummy >> RockCfg.sMeshPrefix;
-		}
+		// Rock scatter config parsing has been moved to the core engine (Planet.cpp).
+		// The D3D9 client accesses it via oapiGetRockScatterCfg().
 	}
 	return true;
 }
@@ -1136,10 +1070,13 @@ bool vPlanet::Render(LPDIRECT3DDEVICE9 dev)
 			RenderSphere (dev);
 		}
 
-		// Render procedural rocks
-		if (Config->bRockEnable > 0) {
-			if (!rockScatter) rockScatter = new RockScatter(this, dev);
-			rockScatter->Render(dev);
+		// Render procedural rocks — only if the core engine has rock config for this planet
+		if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS)) {
+			const ::RockScatterCfg *pRockCfg = oapiGetRockScatterCfg(hObj);
+			if (pRockCfg && pRockCfg->bEnabled) {
+				if (!rockScatter) rockScatter = new RockScatter(this, dev);
+				rockScatter->Render(dev);
+			}
 		}
 
 		if (nbase) {
@@ -1339,7 +1276,7 @@ void vPlanet::RenderBaseShadows(LPDIRECT3DDEVICE9 dev, float depth)
 		if (bObjectShadow) {
 			for (DWORD i = 0; i < nbase; i++) if (vbase[i]) vbase[i]->RenderGroundShadow(dev, depth);
 			
-			if (Config->bRockEnable > 0 && Config->bRockShadows) {
+			if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) && Config->bRockShadows) {
 				if (rockScatter) rockScatter->RenderShadows(dev, depth);
 			}
 			

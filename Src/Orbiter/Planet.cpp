@@ -14,6 +14,7 @@
 #include "Astro.h"
 #include "Element.h"
 #include "Planet.h"
+#include "RockScatter.h"
 #include "elevmgr.h"
 #include "Base.h"
 #include "Camera.h"
@@ -186,6 +187,8 @@ Planet::Planet (double _mass, double _mean_radius)
 	bHasRings = false;
 	labelLegend = NULL;
 	nLabelLegend = 0;
+	m_rockScatter = NULL;
+	memset(&RockCfg, 0, sizeof(RockScatterCfg));
 	Setup ();
 }
 
@@ -215,6 +218,8 @@ Planet::Planet (char *fname)
 	maxelev = 0.0;
 	labelLegend  = NULL;
 	nLabelLegend = 0;
+	m_rockScatter = NULL;
+	memset(&RockCfg, 0, sizeof(RockScatterCfg));
 	ifstream ifs (g_pOrbiter->ConfigPath (fname));
 	if (!ifs) return;
 
@@ -413,6 +418,39 @@ Planet::Planet (char *fname)
 		if (label_version > 1)
 		ScanLabelLegend();
 
+	// Parse RockScatter config — only enabled if the planet .cfg explicitly
+	// contains "SurfaceRocks = TRUE". No key = no rocks, period.
+	{
+		char rsBuf[256];
+		RockCfg.bEnabled = false; // explicit default: OFF
+
+		// Check both key names used in configs
+		bool foundKey = GetItemBool(ifs, "SurfaceRocks", RockCfg.bEnabled);
+		if (!foundKey)
+			foundKey = GetItemBool(ifs, "RockScatter", RockCfg.bEnabled);
+
+		// Only parse the rest if the key was found AND set to true
+		if (foundKey && RockCfg.bEnabled) {
+			RockCfg.fDrawDist     = 500.0f;
+			RockCfg.fDensity      = 0.01f;
+			RockCfg.fSizeSmall[0] = 0.1f;  RockCfg.fSizeSmall[1]  = 0.5f;
+			RockCfg.fSizeMedium[0]= 0.5f;  RockCfg.fSizeMedium[1] = 2.0f;
+			RockCfg.fSizeLarge[0] = 2.0f;  RockCfg.fSizeLarge[1]  = 8.0f;
+			RockCfg.fRatioSmall   = 0.70f;
+			RockCfg.fRatioMedium  = 0.25f;
+			RockCfg.fRatioLarge   = 0.05f;
+
+			double dval;
+			if (GetItemReal(ifs, "RockDrawDist", dval)) RockCfg.fDrawDist = (float)dval;
+			if (GetItemReal(ifs, "RockDensity", dval)) RockCfg.fDensity = (float)dval;
+			int ival;
+			if (GetItemInt(ifs, "RockSeed", ival)) RockCfg.uSeed = (UINT)ival;
+			if (GetItemString(ifs, "RockMeshPrefix", rsBuf) ||
+				GetItemString(ifs, "RockMesh", rsBuf))
+				strncpy_s(RockCfg.sMeshPrefix, sizeof(RockCfg.sMeshPrefix), rsBuf, _TRUNCATE);
+		}
+	}
+
 	Setup();
 }
 
@@ -456,6 +494,7 @@ Planet::~Planet ()
 	g_pOrbiter->UpdateDeallocationProgress();
 
 	delete emgr;
+	delete m_rockScatter;
 }
 
 void Planet::ScanBases (char *path)
@@ -668,6 +707,11 @@ void Planet::Setup ()
 		emgr = new ElevationManager(this);
 	for (DWORD i = 0; i < nbase; i++)
 		baselist[i]->Setup();
+
+	// Create rock scatter system if enabled
+	if (RockCfg.bEnabled && !m_rockScatter) {
+		m_rockScatter = new RockScatter(this);
+	}
 }
 
 const void *Planet::GetParam (DWORD paramtype) const

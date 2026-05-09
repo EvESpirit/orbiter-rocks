@@ -65,6 +65,7 @@ set(common_src
 	PinesGrav.cpp
 	Celbody.cpp
 	Planet.cpp
+	RockScatter.cpp
 	Rigidbody.cpp
 	Star.cpp
 # Vessel classes
