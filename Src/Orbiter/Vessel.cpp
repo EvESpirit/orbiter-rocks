@@ -3,7 +3,7 @@
 
 // ==============================================================
 //              This file is part of ORBITER
-//          Copyright 2000-2007 Martin Schweiger
+//          Copyright 2000-2026 Martin Schweiger
 //
 // Vessel.cpp
 // Implementation of class Vessel
@@ -9427,3 +9427,4 @@ int VESSEL4::clbkNavProcess (int mode)
 {
 	return mode;
 }
+
