@@ -327,6 +327,8 @@ void Vessel::SetDefaultState ()
 	forcevec = new Vector[forcevecbuf];
 	forcepos = new Vector[forcevecbuf];
 
+	nforcevec_col = 0;
+
 	proxyT    = -(double)rand()*100.0/(double)RAND_MAX - 1.0;
 	commsT    = -(double)rand()*5.0/(double)RAND_MAX - 1.0;
 	// distribute update times
@@ -4287,6 +4289,12 @@ void Vessel::UpdateAerodynamicForces_OLD ()
 bool Vessel::AddSurfaceForces (Vector *F, Vector *M, const StateVectors *s, double tfrac, double dt, bool allow_groundcontact) const
 {
 	nforcevec = 0; // should move higher up
+	for (int k = 0; k < nforcevec_col && nforcevec < forcevecbuf; k++) {
+		forcevec[nforcevec] = col_forcevec[k];
+		forcepos[nforcevec] = col_forcepos[k];
+		nforcevec++;
+	}
+
 	E_comp = 0.0;  // compression energy
 
 	int i, j;
@@ -4734,7 +4742,8 @@ void Vessel::RebuildHullCache() {
         continue;
 
       // Downsample: use every 8th vertex for dense meshes, 16th for very dense
-      DWORD step = (grp->nVtx > 1000) ? 16 : (grp->nVtx > 100 ? 8 : 1);
+      DWORD step = (grp->nVtx / 32) + 1;
+      if (step < 8) step = 8;
       for (DWORD v = 0; v < grp->nVtx; v += step) {
         VECTOR3 pt;
         pt.x = grp->Vtx[v].x + meshOfs.x;
@@ -4774,19 +4783,25 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 		M_b2p.Set(base->s1->R);
 		M_b2p.tpremul(pp->s1->R);
 
-		Mesh **m_us, **m_os;
-		DWORD n_us, n_os;
-		base->ExportBaseStructures(&m_us, &n_us, &m_os, &n_os);
+		Mesh **m_col;
+		DWORD n_col;
+		base->ExportCollisionMeshes(&m_col, &n_col);
 
 		BaseCollisionResult bestRes;
 		bestRes.hit = false;
 		bestRes.depth = 0;
 
 		VECTOR3 bPosP = { (float)basePosV.x, (float)basePosV.y, (float)basePosV.z };
+		
+		double vground = Pi2 * sp.rad * sp.clat / pp->RotT();
+		Vector groundVel(-vground * sp.slng, 0.0, vground * sp.clng);
+		groundVel.Set(mul(pp->s1->R, groundVel) + pp->s1->vel);
+		Vector vRelPlanet = s1->vel - groundVel;
+
 		auto checkMeshList = [&](Mesh **mlist, DWORD n) {
 			for (DWORD m = 0; m < n; m++) {
 				BaseCollisionResult res;
-				if (CheckMeshCollision(mlist[m], M_b2p, bPosP, res)) {
+				if (CheckMeshCollision(mlist[m], M_b2p, bPosP, vRelPlanet, res)) {
 					if (!bestRes.hit || res.depth > bestRes.depth) {
 						bestRes = res;
 					}
@@ -4794,34 +4809,84 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 			}
 		};
 
-		checkMeshList(m_us, n_us);
-		checkMeshList(m_os, n_os);
+		checkMeshList(m_col, n_col);
 
 		if (bestRes.hit) {
 			Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
 			Vector normGlobal = mul(pp->s1->R, norm);
-			s1->pos += normGlobal * (bestRes.depth * 0.9);
-			rpos_base = s1->pos;
-			rpos_add.Set(0, 0, 0);
-			double v_rel_norm = dotp(s1->vel - base->s1->vel, normGlobal);
+			
+			// 1. Resolve penetration (100% push-out to stop sinking)
+			Vector pushOut = normGlobal * (bestRes.depth * 1.0);
+			s1->pos += pushOut;
+			rpos_base += pushOut;
+			// We MUST NOT zero rpos_add! It destroys the symplectic integrator's fractional precision.
+
+			double vground = Pi2 * sp.rad * sp.clat / pp->RotT();
+			Vector groundVel(-vground * sp.slng, 0.0, vground * sp.clng);
+			groundVel.Set(mul(pp->s1->R, groundVel) + pp->s1->vel);
+			Vector v_rel = s1->vel - groundVel;
+			double v_rel_norm = dotp(v_rel, normGlobal);
+
 			if (v_rel_norm < 0.0) {
-				s1->vel -= normGlobal * (v_rel_norm * 1.1);
+				// 2. Normal restitution (bounce)
+				// If impact is soft (< 0.5 m/s), don't bounce at all (restitution = 0)
+				double restitution = (fabs(v_rel_norm) > 0.5) ? 0.1 : 0.0;
+				double j_n = -(1.0 + restitution) * v_rel_norm;
+
+				// 3. Tangential friction (sliding & brakes)
+				Vector v_rel_t = v_rel - (normGlobal * v_rel_norm);
+				double vt_len = v_rel_t.length();
+				Vector delta_v_t(0, 0, 0);
+				
+				if (vt_len > 1e-6) {
+					// Read vessel's wheel brakes (average of left and right)
+					double brake = 0.5 * (wbrake[0] + wbrake[1]);
+					
+					// Base friction of 0.8, scaling up to 2.8 with full brakes applied
+					double mu = 0.8 + (brake * 2.0); 
+					double j_t = mu * j_n;
+					
+					// Cap friction impulse so it doesn't reverse our tangential velocity
+					if (j_t > vt_len) j_t = vt_len; 
+					
+					delta_v_t = -(v_rel_t / vt_len) * j_t;
+				}
+
+				// Apply final velocity change
+				s1->vel += (normGlobal * j_n) + delta_v_t;
 				rvel_base = s1->vel;
 				rvel_add.Set(0, 0, 0);
+
+				if (nforcevec_col < 10 && td.SimDT > 0.0) {
+					Vector F_global = ((normGlobal * j_n) + delta_v_t) * (mass / td.SimDT);
+					col_forcevec[nforcevec_col] = tmul(s1->R, F_global);
+					col_forcepos[nforcevec_col] = Vector(bestRes.contactPtLocal.x, bestRes.contactPtLocal.y, bestRes.contactPtLocal.z);
+					nforcevec_col++;
+				}
+
+				// 4. Angular damping
+				// Because this mesh check evaluates a single deepest penetration point,
+				// we heavily dampen angular momentum when resting on pads to simulate
+				// multi-point suspension and prevent the ship from jittering or tipping over.
+				if (fabs(v_rel_norm) < 0.5 && bestRes.depth > 0.005) {
+					Vector planet_omega = mul(pp->s1->R, Vector(0, -Pi2 / pp->RotT(), 0));
+					Vector omega_rel = s1->omega - planet_omega;
+					s1->omega = planet_omega + (omega_rel * 0.8);
+				}
 			}
 		}
 	}
 }
 
-bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &meshPosPlanet, BaseCollisionResult &res) {
+bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &meshPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res) {
 	if (!m || m_hullCacheP.empty()) return false;
 	res.hit = false;
 	double deepestPen = 0.0;
 
 	Vector mPosP(meshPosPlanet.x, meshPosPlanet.y, meshPosPlanet.z);
+	Vector vRelLocal = tmul(M_mesh2planet, vRelPlanet);
 	
 	// Pre-transform hull points to mesh-local frame
-	// This eliminates matrix multiplications in the triangle loop
 	std::vector<Vector> hullM;
 	hullM.reserve(m_hullCacheP.size());
 	Vector hMinM(1e10, 1e10, 1e10), hMaxM(-1e10, -1e10, -1e10);
@@ -4843,23 +4908,48 @@ bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, cons
 		GroupSpec *grp = const_cast<Mesh*>(m)->GetGroup(g);
 		if (!grp || !grp->Vtx || !grp->Idx) continue;
 
+		// 1. Compute Group AABB
+		double gmin_x = 1e10, gmin_y = 1e10, gmin_z = 1e10;
+		double gmax_x = -1e10, gmax_y = -1e10, gmax_z = -1e10;
+		for (DWORD v = 0; v < grp->nVtx; v++) {
+			if (grp->Vtx[v].x < gmin_x) gmin_x = grp->Vtx[v].x;
+			if (grp->Vtx[v].x > gmax_x) gmax_x = grp->Vtx[v].x;
+			if (grp->Vtx[v].y < gmin_y) gmin_y = grp->Vtx[v].y;
+			if (grp->Vtx[v].y > gmax_y) gmax_y = grp->Vtx[v].y;
+			if (grp->Vtx[v].z < gmin_z) gmin_z = grp->Vtx[v].z;
+			if (grp->Vtx[v].z > gmax_z) gmax_z = grp->Vtx[v].z;
+		}
+		
+		// 2. Reject group if AABBs don't overlap
+		if (gmax_x < hMinM.x || gmin_x > hMaxM.x ||
+		    gmax_y < hMinM.y || gmin_y > hMaxM.y ||
+		    gmax_z < hMinM.z || gmin_z > hMaxM.z) continue;
+
+		// 3. Filter hull points to only those near this group
+		std::vector<std::pair<Vector, size_t>> groupHull;
+		for (size_t ptIdx = 0; ptIdx < hullM.size(); ptIdx++) {
+			const auto& hp_m = hullM[ptIdx];
+			if (hp_m.x >= gmin_x - 0.1 && hp_m.x <= gmax_x + 0.1 &&
+			    hp_m.y >= gmin_y - 0.1 && hp_m.y <= gmax_y + 0.1 &&
+			    hp_m.z >= gmin_z - 0.1 && hp_m.z <= gmax_z + 0.1) {
+				groupHull.push_back({hp_m, ptIdx});
+			}
+		}
+		if (groupHull.empty()) continue;
+
+		// 4. Test triangles against filtered hull points
 		for (DWORD i = 0; i < grp->nIdx; i += 3) {
 			const auto& v0_raw = grp->Vtx[grp->Idx[i]];
 			const auto& v1_raw = grp->Vtx[grp->Idx[i+1]];
 			const auto& v2_raw = grp->Vtx[grp->Idx[i+2]];
 
-			// Triangle AABB culling in mesh-local frame
+			// Triangle AABB culling
 			double tmin_x = min(v0_raw.x, min(v1_raw.x, v2_raw.x)) - 0.1;
 			double tmax_x = max(v0_raw.x, max(v1_raw.x, v2_raw.x)) + 0.1;
-			if (tmin_x > hMaxM.x || tmax_x < hMinM.x) continue;
-
 			double tmin_y = min(v0_raw.y, min(v1_raw.y, v2_raw.y)) - 0.1;
 			double tmax_y = max(v0_raw.y, max(v1_raw.y, v2_raw.y)) + 0.1;
-			if (tmin_y > hMaxM.y || tmax_y < hMinM.y) continue;
-
 			double tmin_z = min(v0_raw.z, min(v1_raw.z, v2_raw.z)) - 0.1;
 			double tmax_z = max(v0_raw.z, max(v1_raw.z, v2_raw.z)) + 0.1;
-			if (tmin_z > hMaxM.z || tmax_z < hMinM.z) continue;
 
 			Vector p0(v0_raw.x, v0_raw.y, v0_raw.z);
 			Vector p1(v1_raw.x, v1_raw.y, v1_raw.z);
@@ -4872,17 +4962,20 @@ bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, cons
 			if (area2 < 1e-6) continue;
 			n /= area2;
 
-			// Heuristic to ensure normal points OUT of the mesh
-			if (dotp(n, p0) < 0) n = -n;
+			// Ignore faces that are moving away from the penetrating points
+			if (dotp(vRelLocal, n) > 0.1) continue;
 
-			for (const auto& hp_m : hullM) {
+			for (const auto& hp_pair : groupHull) {
+				const auto& hp_m = hp_pair.first;
+				size_t ptIdx = hp_pair.second;
+
 				// Hull point AABB check
 				if (hp_m.x < tmin_x || hp_m.x > tmax_x ||
 					hp_m.y < tmin_y || hp_m.y > tmax_y ||
 					hp_m.z < tmin_z || hp_m.z > tmax_z) continue;
 
 				double d = dotp(hp_m - p0, n);
-				if (d > 0.05 || d < -200.0) continue;
+				if (d > 0.05 || d < -2.0) continue;
 
 				// Barycentric check
 				Vector v2p = hp_m - p0;
@@ -4902,10 +4995,19 @@ bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, cons
 					if (pen > deepestPen) {
 						deepestPen = pen;
 						res.hit = true;
-						// Transform normal back to planet frame for response
 						Vector nP = mul(M_mesh2planet, n);
 						res.normal = { (float)nP.x, (float)nP.y, (float)nP.z };
 						res.depth = pen;
+						if (ptIdx < m_hullCache.size()) {
+							res.contactPtLocal = { (float)m_hullCache[ptIdx].x, (float)m_hullCache[ptIdx].y, (float)m_hullCache[ptIdx].z };
+						} else {
+							size_t tdi = ptIdx - m_hullCache.size();
+							if (tdi < ntouchdown_vtx) {
+								res.contactPtLocal = { (float)touchdown_vtx[tdi].pos.x, (float)touchdown_vtx[tdi].pos.y, (float)touchdown_vtx[tdi].pos.z };
+							} else {
+								res.contactPtLocal = { 0, 0, 0 };
+							}
+						}
 					}
 				}
 			}
@@ -4941,95 +5043,285 @@ void Vessel::UpdateHullCacheP() {
 		if (m_hullCacheP[i].y > m_hullMaxP.y) m_hullMaxP.y = m_hullCacheP[i].y;
 		if (m_hullCacheP[i].z > m_hullMaxP.z) m_hullMaxP.z = m_hullCacheP[i].z;
 	}
+	// This ensures that deployed landing gears (which are often visual animations
+	// and missing from static .msh vertices) physically collide with base meshes.
+	if (proxyplanet && touchdown_vtx && ntouchdown_vtx > 0) {
+		Planet *pp = (Planet*)proxyplanet;
+		
+		for (DWORD i = 0; i < ntouchdown_vtx; i++) {
+			// 1. Transform local Touchdown Point to Global space
+			Vector tdpGlobal = s1->pos + mul(s1->R, touchdown_vtx[i].pos);
+			
+			// 2. Transform to the Planet's rotating reference frame 
+			Vector tdpPlanet = tdpGlobal - pp->s1->pos;
+			tdpPlanet.Set(tmul(pp->s1->R, tdpPlanet));
+			
+			// 3. Append to your cache
+			VECTOR3 v3;
+			v3.x = (float)tdpPlanet.x;
+			v3.y = (float)tdpPlanet.y;
+			v3.z = (float)tdpPlanet.z;
+			m_hullCacheP.push_back(v3);
+		}
+	}
 	m_hullCachePValid = true;
 }
 
-void Vessel::CheckVesselCollisions() {
-	if (!g_pOrbiter->Cfg()->CfgPhysicsPrm.bVesselCollision) return;
-	if (!proxyplanet) return;
+void Vessel::ResolveCollisionWith(Vessel *v) {
+	if (!proxyplanet || proxyplanet != v->proxyplanet) return;
+
+	Vessel *v_root = v;
+	while (v_root->attach && v_root->attach->mate) v_root = v_root->attach->mate;
+	Vessel *my_root = this;
+	while (my_root->attach && my_root->attach->mate) my_root = my_root->attach->mate;
+	if (v_root == my_root) return;
+	
+	if (supervessel && supervessel == v->supervessel) return; // Skip docked vessels
+
+	// Relative velocity and position
+	Vector pRel = v->s1->pos - s1->pos;
+	Vector vRel = v->s1->vel - s1->vel;
+	double rsum = size + v->Size();
+
+	// Broad-phase CCD check
+	double dir = dotp(pRel, vRel);
+	if (dir >= 0.0 && pRel.length() > rsum + 5.0) return; // Moving apart
+
+	extern TimeData td;
+	double t = -dir / vRel.length2();
+	if (t > 0.0 && t < td.SimDT) {
+		Vector closestApproach = pRel + (vRel * t);
+		if (closestApproach.length() > rsum + 5.0) return; // Missed
+	} else {
+		if (pRel.length() > rsum + 5.0) return; // Did not overlap at start or end of frame
+	}
+
+	// Drop time warp if we are close to collision
+	if (td.Warp() > 1.0) {
+		g_pOrbiter->SetWarpFactor(1.0);
+	}
+
 	UpdateHullCacheP();
 	if (m_hullCacheP.empty()) return;
 
 	Planet *pp = (Planet*)proxyplanet;
+	
+	BaseCollisionResult bestRes;
+	bestRes.hit = false;
+	bestRes.depth = 0;
+	bool bestResFromB = false;
 
-	for (DWORD i = 0; i < g_psys->nVessel(); i++) {
-		Vessel *v = g_psys->GetVessel(i);
-		Vessel *v_root = v;
-		while (v_root->attach && v_root->attach->mate) v_root = v_root->attach->mate;
-		Vessel *my_root = this;
-		while (my_root->attach && my_root->attach->mate) my_root = my_root->attach->mate;
-		if (v == this || v_root == my_root) continue;
+	// 1. Check A's hull vs B's meshes
+	Matrix M_B2p;
+	M_B2p.Set(v->s1->R);
+	M_B2p.tpremul(pp->s1->R);
+	Vector posB_P(v->s1->pos - pp->s1->pos);
+	posB_P.Set(tmul(pp->s1->R, posB_P));
+	Vector vRel_AvsB = s1->vel - v->s1->vel;
 
-		double dst2 = s1->pos.dist2(v->s1->pos);
-		double rsum = size + v->Size();
-		
-		if (dst2 > (rsum + 5.0) * (rsum + 5.0)) continue;
+	for (DWORD mi = 0; mi < v->nmesh; mi++) {
+		if (!v->meshlist[mi] || !v->meshlist[mi]->hMesh) continue;
+		Mesh *m = (Mesh*)v->meshlist[mi]->hMesh;
 
-		Matrix M_other2p;
-		M_other2p.Set(v->s1->R);
-		M_other2p.tpremul(pp->s1->R);
+		Vector meshOfsP = mul(M_B2p, Vector(v->meshlist[mi]->meshofs.x, v->meshlist[mi]->meshofs.y, v->meshlist[mi]->meshofs.z));
+		VECTOR3 mPosP = { (float)(posB_P.x + meshOfsP.x), (float)(posB_P.y + meshOfsP.y), (float)(posB_P.z + meshOfsP.z) };
 
-		Vector otherPosV(v->s1->pos - pp->s1->pos);
-		otherPosV.Set(tmul(pp->s1->R, otherPosV));
-
-		BaseCollisionResult bestRes;
-		bestRes.hit = false;
-		bestRes.depth = 0;
-
-		for (DWORD mi = 0; mi < v->nmesh; mi++) {
-			if (!v->meshlist[mi] || !v->meshlist[mi]->hMesh) continue;
-			Mesh *m = (Mesh*)v->meshlist[mi]->hMesh;
-
-			Vector meshOfsP = mul(M_other2p, Vector(v->meshlist[mi]->meshofs.x, v->meshlist[mi]->meshofs.y, v->meshlist[mi]->meshofs.z));
-			VECTOR3 mPosP = { (float)(otherPosV.x + meshOfsP.x), (float)(otherPosV.y + meshOfsP.y), (float)(otherPosV.z + meshOfsP.z) };
-
-			BaseCollisionResult res;
-			if (CheckMeshCollision(m, M_other2p, mPosP, res)) {
-				if (!bestRes.hit || res.depth > bestRes.depth) {
-					bestRes = res;
-				}
+		BaseCollisionResult res;
+		if (CheckMeshCollision(m, M_B2p, mPosP, vRel_AvsB, res)) {
+			if (!bestRes.hit || res.depth > bestRes.depth) {
+				bestRes = res;
+				bestResFromB = false;
 			}
-		}
-
-		if (bestRes.hit) {
-			Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
-			Vector normGlobal = mul(pp->s1->R, norm);
-			
-			// Resolve 100% of penetration (active push-out)
-			Vector deltaPos = normGlobal * (bestRes.depth * 1.0);
-			Vector deltaVel(0,0,0);
-
-			double v_rel_norm = dotp(my_root->s1->vel - v_root->s1->vel, normGlobal);
-			if (v_rel_norm < 0.0) {
-				// Kill 100% of relative velocity and add a small bounce
-				deltaVel = normGlobal * (v_rel_norm * 1.05);
-			}
-
-			// Apply changes to the ENTIRE stack and sync surface parameters
-			// This prevents landed vessels from "snapping back" to their old equatorial coords
-			for (DWORD j = 0; j < g_psys->nVessel(); j++) {
-				Vessel *vj = g_psys->GetVessel(j);
-				Vessel *vj_root = vj;
-				while (vj_root->attach && vj_root->attach->mate) vj_root = vj_root->attach->mate;
-				
-				if (vj_root == my_root) {
-					vj->s1->pos += deltaPos;
-					vj->rpos_base += deltaPos;
-					vj->s1->vel -= deltaVel;
-					vj->rvel_base -= deltaVel;
-					vj->UpdateSurfParams();
-				}
-			}
-
-			// Force hull cache refresh if we moved significantly
-			m_hullCachePValid = false;
 		}
 	}
+
+	// 2. Check B's hull vs A's meshes
+	v->UpdateHullCacheP();
+	if (!v->m_hullCacheP.empty()) {
+		Matrix M_A2p;
+		M_A2p.Set(s1->R);
+		M_A2p.tpremul(pp->s1->R);
+		Vector posA_P(s1->pos - pp->s1->pos);
+		posA_P.Set(tmul(pp->s1->R, posA_P));
+		Vector vRel_BvsA = v->s1->vel - s1->vel;
+
+		for (DWORD mi = 0; mi < nmesh; mi++) {
+			if (!meshlist[mi] || !meshlist[mi]->hMesh) continue;
+			Mesh *m = (Mesh*)meshlist[mi]->hMesh;
+
+			Vector meshOfsP = mul(M_A2p, Vector(meshlist[mi]->meshofs.x, meshlist[mi]->meshofs.y, meshlist[mi]->meshofs.z));
+			VECTOR3 mPosP = { (float)(posA_P.x + meshOfsP.x), (float)(posA_P.y + meshOfsP.y), (float)(posA_P.z + meshOfsP.z) };
+
+			BaseCollisionResult res;
+			if (v->CheckMeshCollision(m, M_A2p, mPosP, vRel_BvsA, res)) {
+				if (!bestRes.hit || res.depth > bestRes.depth) {
+					// The normal from CheckMeshCollision points OUT of A's mesh (towards B).
+					// To maintain the convention "normal points from B to A", we must negate it.
+					res.normal.x = -res.normal.x;
+					res.normal.y = -res.normal.y;
+					res.normal.z = -res.normal.z;
+					bestRes = res;
+					bestResFromB = true;
+				}
+			}
+		}
+	}
+
+	if (bestRes.hit) {
+		Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
+		Vector normGlobal = mul(pp->s1->R, norm);
+		
+		Vector contactPtGlobal;
+		if (bestResFromB) {
+			contactPtGlobal = v->s1->pos + mul(v->s1->R, Vector(bestRes.contactPtLocal.x, bestRes.contactPtLocal.y, bestRes.contactPtLocal.z));
+		} else {
+			contactPtGlobal = s1->pos + mul(s1->R, Vector(bestRes.contactPtLocal.x, bestRes.contactPtLocal.y, bestRes.contactPtLocal.z));
+		}
+		
+		Vector rA = contactPtGlobal - s1->pos;
+		Vector rB = contactPtGlobal - v->s1->pos;
+		
+		Vector velA = s1->vel + crossp(s1->omega, rA);
+		Vector velB = v->s1->vel + crossp(v->s1->omega, rB);
+		Vector vRelContact = velA - velB;
+
+		double relVelAlongNormal = dotp(vRelContact, normGlobal);
+		if (relVelAlongNormal > 0) return; // Already separating
+
+		// Hypervelocity impact check
+		if (fabs(relVelAlongNormal) > 500.0) {
+			my_root->RequestDestruct();
+			v_root->RequestDestruct();
+			return;
+		}
+
+		// Calculate Inverse Inertia Tensors (simulate multi-point contact by reducing inverse inertia)
+		Vector invI_A(0.5 / (PMI().x * Mass()), 0.5 / (PMI().y * Mass()), 0.5 / (PMI().z * Mass()));
+		Vector invI_B(0.5 / (v->PMI().x * v->Mass()), 0.5 / (v->PMI().y * v->Mass()), 0.5 / (v->PMI().z * v->Mass()));
+
+		// Calculate Impulse magnitude (j)
+		double e = 0.2; // Restitution (bounciness)
+		Vector crossA = crossp(rA, normGlobal);
+		Vector crossB = crossp(rB, normGlobal);
+
+		Vector crossA_local = tmul(s1->R, crossA);
+		Vector crossB_local = tmul(v->s1->R, crossB);
+		
+		Vector iIT_crossA_local = crossA_local * invI_A;
+		Vector iIT_crossB_local = crossB_local * invI_B;
+
+		Vector iIT_crossA_global = mul(s1->R, iIT_crossA_local);
+		Vector iIT_crossB_global = mul(v->s1->R, iIT_crossB_local);
+
+		double angularEffect = dotp(crossp(iIT_crossA_global, rA) + crossp(iIT_crossB_global, rB), normGlobal);
+		
+		double j = -(1.0 + e) * relVelAlongNormal;
+		j /= (1.0 / Mass()) + (1.0 / v->Mass()) + angularEffect;
+
+		// Apply Normal Impulse
+		Vector impulse = normGlobal * j;
+		Vector deltaVelA = impulse / Mass();
+		Vector deltaVelB = -(impulse / v->Mass());
+		Vector deltaOmegaA = iIT_crossA_local * j;
+		Vector deltaOmegaB = -(iIT_crossB_local * j);
+
+		// Apply Tangential Friction
+		Vector vRel_t = vRelContact - (normGlobal * relVelAlongNormal);
+		double vt_len = vRel_t.length();
+		if (vt_len > 1e-4) {
+			Vector tangent = vRel_t / vt_len;
+			
+			Vector crossA_t = crossp(rA, tangent);
+			Vector crossB_t = crossp(rB, tangent);
+			Vector iIT_crossA_t_local = tmul(s1->R, crossA_t) * invI_A;
+			Vector iIT_crossB_t_local = tmul(v->s1->R, crossB_t) * invI_B;
+			Vector iIT_crossA_t_global = mul(s1->R, iIT_crossA_t_local);
+			Vector iIT_crossB_t_global = mul(v->s1->R, iIT_crossB_t_local);
+			
+			double angularEffect_t = dotp(crossp(iIT_crossA_t_global, rA) + crossp(iIT_crossB_t_global, rB), tangent);
+			double effectiveMass_t = 1.0 / ((1.0 / Mass()) + (1.0 / v->Mass()) + angularEffect_t);
+			
+			double jt = vt_len * effectiveMass_t;
+			double mu = 0.6; 
+			if (jt > mu * j) jt = mu * j;
+			
+			Vector frictionImpulse = tangent * jt;
+			deltaVelA -= frictionImpulse / Mass();
+			deltaVelB += frictionImpulse / v->Mass();
+			deltaOmegaA -= iIT_crossA_t_local * jt;
+			deltaOmegaB += iIT_crossB_t_local * jt;
+		}
+
+		// Positional correction (Push out so they no longer overlap, +1% margin)
+		double totalMass = Mass() + v->Mass();
+		double pushOutMag = bestRes.depth * 1.01;
+		Vector deltaPosA = normGlobal * (pushOutMag * (v->Mass() / totalMass));
+		Vector deltaPosB = -(normGlobal * (pushOutMag * (Mass() / totalMass)));
+
+		// Apply changes to the ENTIRE stack
+		for (DWORD idx = 0; idx < g_psys->nVessel(); idx++) {
+			Vessel *vj = g_psys->GetVessel(idx);
+			Vessel *vj_root = vj;
+			while (vj_root->attach && vj_root->attach->mate) vj_root = vj_root->attach->mate;
+			
+			if (vj_root == my_root) {
+				if (vj->fstatus == FLIGHTSTATUS_LANDED) {
+					vj->fstatus = FLIGHTSTATUS_FREEFLIGHT;
+					vj->bSurfaceContact = false;
+					if (vj->proxybase) vj->proxybase->ReportTakeoff (vj);
+					if (vj->lstatus == 3 || vj->lstatus == 5) vj->lstatus = 1;
+					vj->rpos_base = vj->s1->pos; vj->rpos_add.Set(0,0,0);
+					vj->s1->vel += vj->rvel_add;
+					vj->rvel_base = vj->s1->vel; vj->rvel_add.Set(0,0,0);
+					vj->s1->omega.Set(0,0,0);
+				}
+
+				vj->s1->pos += deltaPosA;
+				vj->rpos_base += deltaPosA;
+				vj->s1->vel += deltaVelA;
+				vj->rvel_base += deltaVelA;
+				vj->s1->omega += deltaOmegaA;
+				vj->UpdateSurfParams();
+				
+				if (vj->nforcevec_col < 10 && td.SimDT > 0.0) {
+					Vector F_global = deltaVelA * (vj->Mass() / td.SimDT);
+					vj->col_forcevec[vj->nforcevec_col] = tmul(vj->s1->R, F_global);
+					vj->col_forcepos[vj->nforcevec_col] = tmul(vj->s1->R, contactPtGlobal - vj->s1->pos);
+					vj->nforcevec_col++;
+				}
+			}
+			else if (vj_root == v_root) {
+				if (vj->fstatus == FLIGHTSTATUS_LANDED) {
+					vj->fstatus = FLIGHTSTATUS_FREEFLIGHT;
+					vj->bSurfaceContact = false;
+					if (vj->proxybase) vj->proxybase->ReportTakeoff (vj);
+					if (vj->lstatus == 3 || vj->lstatus == 5) vj->lstatus = 1;
+					vj->rpos_base = vj->s1->pos; vj->rpos_add.Set(0,0,0);
+					vj->s1->vel += vj->rvel_add;
+					vj->rvel_base = vj->s1->vel; vj->rvel_add.Set(0,0,0);
+					vj->s1->omega.Set(0,0,0);
+				}
+
+				vj->s1->pos += deltaPosB;
+				vj->rpos_base += deltaPosB;
+				vj->s1->vel += deltaVelB;
+				vj->rvel_base += deltaVelB;
+				vj->s1->omega += deltaOmegaB;
+				vj->UpdateSurfParams();
+				
+				if (vj->nforcevec_col < 10 && td.SimDT > 0.0) {
+					Vector F_global = deltaVelB * (vj->Mass() / td.SimDT);
+					vj->col_forcevec[vj->nforcevec_col] = tmul(vj->s1->R, F_global);
+					vj->col_forcepos[vj->nforcevec_col] = tmul(vj->s1->R, contactPtGlobal - vj->s1->pos);
+					vj->nforcevec_col++;
+				}
+			}
+		}
+
+		m_hullCachePValid = false;
+		v->m_hullCachePValid = false;
+	}
 }
-
-// =======================================================================
-// vessel state update
-
 void Vessel::Update (bool force)
 {
 	// if the vessel is part of a composite structure or passively attached
@@ -5087,6 +5379,8 @@ void Vessel::Update (bool force)
 	// update surface parameters
 	if (proxybody && fstatus != FLIGHTSTATUS_LANDED)
 		UpdateSurfParams();
+
+	nforcevec_col = 0;
 
 	if (proxyplanet && fstatus != FLIGHTSTATUS_LANDED && !bFRplayback) {
 
@@ -5146,9 +5440,18 @@ void Vessel::Update (bool force)
 						double vToward = dotp(surfRelVel, normGlobal);
 						if (vToward < 0.0) {
 							double restitution = 0.1; // 10% bounce-back
-							s1->vel -= normGlobal * vToward * (1.0 + restitution);
+							Vector deltaVel = -(normGlobal * vToward * (1.0 + restitution));
+							s1->vel += deltaVel;
 							rvel_base = s1->vel;
 							rvel_add.Set(0, 0, 0);
+
+							if (nforcevec_col < 10 && td.SimDT > 0.0) {
+								Vector F_global = deltaVel * (mass / td.SimDT);
+								col_forcevec[nforcevec_col] = tmul(s1->R, F_global);
+								Vector p_planet_local(hitRes.contactPtLocal.x, hitRes.contactPtLocal.y, hitRes.contactPtLocal.z);
+								col_forcepos[nforcevec_col] = tmul(V2P, p_planet_local - localPosV);
+								nforcevec_col++;
+							}
 						}
 
 						oapiWriteLogV("ROCK_COLLISION[%s]: depth=%.4f vToward=%.3f "
@@ -5169,11 +5472,6 @@ void Vessel::Update (bool force)
 
 	if (proxyplanet && !bFRplayback) {
 		m_hullCachePValid = false; // reset cache for this frame
-
-		// vessel-to-vessel collision (before landed logic)
-		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bVesselCollision) {
-			CheckVesselCollisions();
-		}
 
 		// handle planetary surface touchdown events
 		if (sp.alt < 2.0*size) {
@@ -5388,6 +5686,16 @@ void Vessel::PostUpdate ()
 	// module clbkPostStep is called for the vessel
 
 	VesselBase::PostUpdate ();
+
+	if (proxyplanet && !bFRplayback) {
+		// Vessel-to-vessel collisions
+		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bVesselCollision) {
+			for (DWORD i = 0; i < g_psys->nVessel(); i++) {
+				Vessel *v = g_psys->GetVessel(i);
+				if (v > this) ResolveCollisionWith(v);
+			}
+		}
+	}
 
 	DWORD j, k;
 

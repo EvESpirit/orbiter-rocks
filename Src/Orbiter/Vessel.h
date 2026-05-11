@@ -1703,6 +1703,10 @@ private:
 	int forcevecbuf;   // length of vector list
 	mutable int nforcevec;     // number of vectors to render
 
+	int nforcevec_col; // number of collision vectors
+	Vector col_forcevec[10];
+	Vector col_forcepos[10];
+
 	char *classname;   // vessel class name
 	char *onlinehelp;  // string for online help support (or NULL if none)
 
@@ -1725,8 +1729,8 @@ private:
 	void RebuildHullCache();            // (re)build m_hullCache from meshlist
 	void UpdateHullCacheP();            // update m_hullCacheP from m_hullCache
 	void CheckBaseCollisions(class Planet *pp);
-	void CheckVesselCollisions();
-	bool CheckMeshCollision(const class Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &vPosPlanet, BaseCollisionResult &res);
+	void ResolveCollisionWith(Vessel *v);
+	bool CheckMeshCollision(const class Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &vPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res);
 
 	UINT exhaust_id;   // next exhaust id to attach
 
