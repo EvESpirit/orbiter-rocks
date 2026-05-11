@@ -6,7 +6,7 @@ extern class D3D9Client* g_client;
 // Launchpad dialog.
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
 // Dual licensed under GPL v3 and LGPL v3
-// Copyright (C) 2006-2016 Martin Schweiger
+// Copyright (C) 2006-2026 Martin Schweiger
 //				 2010-2016 Jarmo Nikkanen (D3D9Client implementation)
 // ==============================================================
 
@@ -18,7 +18,6 @@ extern class D3D9Client* g_client;
 #include "AABBUtil.h"
 #include "D3D9Config.h"
 #include "Commctrl.h"
-#include "Junction.h"
 #include "OapiExtension.h"
 #include <vector>
 #include <sstream>
@@ -539,10 +538,6 @@ INT_PTR CALLBACK VideoTab::SetupDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 			MessageBoxA(hWnd,"You must restart launchpad for changes to take effect","Notification",MB_OK);
 			break;
 
-		case IDC_SYMBOLIC:
-			CreateSymbolicLinks();
-			break;
-
 		case IDC_CREDITS:
 			LoadLibrary("riched20.dll");
 			DialogBoxParamA(hInst, MAKEINTRESOURCEA(IDD_D3D9CREDITS), hWnd, CreditsDlgProcWrp, (LPARAM)this);
@@ -1005,85 +1000,6 @@ void VideoTab::SaveSetupState(HWND hWnd)
 
 
 
-
-
-
-void VideoTab::CreateSymbolicLinks()
-{
-	// Ask user
-	//
-	int ret = MessageBox(NULL, "This function will create a symbolic links in /Modules/Server/ folder "
-								"as required by some addons like the spacecraft3.dll.\n\n"
-								"Do you want to proceed ?", "D3D9Client Configuration", MB_YESNO);
-	if (ret != IDYES) {
-		return;
-	}
-
-	std::string result("");
-
-	// Config -> Modules/Server/Config
-	//
-	result += "Config: ";
-	if (junction::TargetDirectoryExists(OapiExtension::GetConfigDir()))
-	{
-		if (!junction::IsDirectoryJunction("Modules\\Server\\Config"))
-		{
-			if (!junction::CreateJunctionPoint(OapiExtension::GetConfigDir(), "Modules\\Server\\Config"))
-			{
-				result += (GetLastError() == ERROR_DIR_NOT_EMPTY)
-						? "OK. A non-empty 'Config' directory already exists."
-						: "FAIL. Could not create link.";
-			} else {
-				result += "OK. Link created.";
-			}
-		} else {
-			result += "OK. Link exists.";
-		}
-	} else {
-		result += "FAIL. Target does not exist!";
-	}
-	result += "\r\n";
-
-	// Sound -> Modules/Server/Sound
-	//
-	if (OapiExtension::RunsOrbiter2010())
-	{
-		result += "Sound: ";
-		if (junction::TargetDirectoryExists("Sound"))
-		{
-			if (OapiExtension::RunsOrbiterSound40()) {
-				result += "OK. OrbiterSound (4.0) detected. No link necessary.";
-			}
-			else if (!junction::IsDirectoryJunction("Modules\\Server\\Sound"))
-			{
-				if (!junction::CreateJunctionPoint("Sound", "Modules\\Server\\Sound"))
-				{
-					result += (GetLastError() == ERROR_DIR_NOT_EMPTY)
-							? "OK. A non-empty 'Sound' directory already exists."
-							: "FAIL. Could not create link.";
-				}
-				else {
-					result += "OK. Link created.";
-				}
-			}
-			else {
-				result += "OK. Link exists.";
-			}
-		}
-		else {
-			result += "OK. OrbiterSound not installed.";
-		}
-		result += "\r\n";
-	}
-
-	MessageBox(NULL, result.c_str(), "D3D9Client Configuration", MB_OK);
-}
-
-
-
-
-
-
 // ***************************************************************************************************
 // Credist Dialog
 // ***************************************************************************************************
@@ -1185,5 +1101,6 @@ void VideoTab::ScanAtmoCfgs()
 		FindClose(hFile);
 	}
 }
+
 
 

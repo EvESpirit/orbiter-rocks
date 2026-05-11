@@ -3,7 +3,7 @@
 
 // ==============================================================
 //              This file is part of ORBITER
-//          Copyright 2000-2007 Martin Schweiger
+//          Copyright 2000-2026 Martin Schweiger
 //
 // Vessel.cpp
 // Implementation of class Vessel
@@ -5056,7 +5056,7 @@ void Vessel::UpdateHullCacheP() {
 			Vector tdpPlanet = tdpGlobal - pp->s1->pos;
 			tdpPlanet.Set(tmul(pp->s1->R, tdpPlanet));
 			
-			// 3. Append to your cache
+			// 3. Append to our cache
 			VECTOR3 v3;
 			v3.x = (float)tdpPlanet.x;
 			v3.y = (float)tdpPlanet.y;
@@ -9735,3 +9735,4 @@ int VESSEL4::clbkNavProcess (int mode)
 {
 	return mode;
 }
+
