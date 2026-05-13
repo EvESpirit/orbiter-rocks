@@ -266,7 +266,7 @@ public:
 	sOverlay *		AddOverlaySurface(VECTOR4 lnglat, gcCore::OlayType type, LPDIRECT3DTEXTURE9 pSrf = NULL, sOverlay *pOld = NULL, const FVECTOR4* pB = NULL);
 	sOverlay *		IntersectOverlay(VECTOR4 bounds, FVECTOR4* texcoord) const;
 
-	// Surface rock scatter — config is owned by core engine, accessed via oapiGetRockScatterCfg()
+	// Surface rock scatter - config is owned by core engine, accessed via oapiGetRockScatterCfg()
 	RockScatter* GetRockScatter() const { return rockScatter; }
 	
 

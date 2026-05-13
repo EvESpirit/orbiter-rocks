@@ -5,6 +5,11 @@
 
 \subsection{New features}
 $\blacktriangleright$ Added option PlanetTexDir to Orbiter.cfg to redirect planetary texture directories\\
+$\blacktriangleright$ \textbf{Collision and Physics Engine:}\\
+$\circ$ \textbf{Mesh-to-mesh collisions:} Implemented a new, high-performance collision detection system based on point-to-triangle intersection tests. This allows for mesh-accurate collisions between vessels, and between vessels and planetary surface objects.\\
+$\circ$ \textbf{Scatterer System:} A new procedural scatterer system (foliage and rocks) has been added, supporting physical collisions with vessels.\\
+$\circ$ \textbf{Rigid-body dynamics:} Collisions are resolved using a Newtonian rigid-body impulse solver, calculating both normal and tangential (friction) impulses for realistic physics interactions.\\
+$\circ$ \textbf{Base Configuration:} Added support for the \texttt{COLLISION} marker in base \texttt{.cfg} files to enable/disable collision detection on a per-mesh basis.\\
 \begin{sloppypar}% for large words
 $\blacktriangleright$ D3D9Client:\\
 $\circ$ D3D9Client with full development history added\\

@@ -1070,7 +1070,7 @@ bool vPlanet::Render(LPDIRECT3DDEVICE9 dev)
 			RenderSphere (dev);
 		}
 
-		// Render procedural rocks — only if the core engine has rock config for this planet
+		// Render procedural rocks - only if the core engine has rock config for this planet
 		if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS)) {
 			const ::RockScatterCfg *pRockCfg = oapiGetRockScatterCfg(hObj);
 			if (pRockCfg && pRockCfg->bEnabled) {

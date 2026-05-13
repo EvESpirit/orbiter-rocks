@@ -739,7 +739,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
     if (!batch.mesh)
       continue;
 
-    // Begin batch for this mesh variant — sets up ALL shader state once
+    // Begin batch for this mesh variant - sets up ALL shader state once
     batch.mesh->RenderBatchBegin(&sunParams);
 
     std::vector<D3DXMATRIX> debugMatrices;
@@ -800,7 +800,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
           if (scr_size < 1.0f)
             continue;
 
-          // Build world matrix — localPos is already unit-length, skip Norm3
+          // Build world matrix - localPos is already unit-length, skip Norm3
           D3DXVECTOR3 up = rock.localPos;
           D3DXVECTOR3 right, fwd;
 
@@ -1004,7 +1004,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
                                             GetLodCull(rock.sizeClass))
             continue;
 
-          // localPos is already unit-length — skip Norm3
+          // localPos is already unit-length - skip Norm3
           D3DXVECTOR3 up = rock.localPos;
 
           float nd = D3DXVec3Dot(&up, &lsun);

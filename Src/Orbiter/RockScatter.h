@@ -4,7 +4,7 @@
 // Dual licensed under GPL v3 and LGPL v3
 // ==============================================================
 //
-// Core rock scatter system — procedurally generates deterministic
+// Core rock scatter system - procedurally generates deterministic
 // rock fields on planetary surfaces and provides collision geometry.
 // Rendering is handled separately by the graphics client.
 // ==============================================================

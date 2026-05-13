@@ -418,8 +418,8 @@ Planet::Planet (char *fname)
 		if (label_version > 1)
 		ScanLabelLegend();
 
-	// Parse RockScatter config — only enabled if the planet .cfg explicitly
-	// contains "SurfaceRocks = TRUE". No key = no rocks, period.
+	// RockScatter config
+	// contains "SurfaceRocks = TRUE". No key = no rocks.
 	{
 		char rsBuf[256];
 		RockCfg.bEnabled = false; // explicit default: OFF

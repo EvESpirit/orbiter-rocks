@@ -1,5 +1,5 @@
 // ==============================================================
-// RockScatter.cpp — Core engine rock scatter (data + collision only)
+// RockScatter.cpp - Core engine rock scatter (data + collision only)
 // ==============================================================
 
 #include "RockScatter.h"
@@ -48,7 +48,7 @@ VECTOR3 RockScatter::Norm3(const VECTOR3 &v) {
   return _V(v.x/len, v.y/len, v.z/len);
 }
 
-// ---- Collision geometry from loaded meshes ----
+// Collision geometry from loaded meshes
 
 void RockScatter::BuildCollisionGeometry() {
   for (int i = 0; i < 3; i++) {
@@ -58,8 +58,7 @@ void RockScatter::BuildCollisionGeometry() {
   }
 
   if (m_cfg.sMeshPrefix[0] == '\0') {
-    // No custom meshes — build simple icosphere collision geometry
-    // procedurally for each size class
+    // Build simple icosphere collision geometry procedurally for each size class
     for (int sc = 0; sc < 3; sc++) {
       CollisionGeom cg;
       cg.maxRadius = 0.0f;
@@ -183,14 +182,14 @@ void RockScatter::BuildCollisionGeometry() {
   }
 }
 
-// ---- Constructor / Destructor ----
+// Constructor / Destructor
 
 RockScatter::RockScatter(Planet *planet)
     : m_planet(planet), m_seed(0) {
   memset(&m_cfg, 0, sizeof(m_cfg));
   m_meshCount[0] = m_meshCount[1] = m_meshCount[2] = 0;
 
-  // Read config from planet — it must have been parsed already
+  // Read config from planet - it must have been parsed already
   // (Planet stores it in RockCfg)
   memcpy(&m_cfg, &planet->RockCfg, sizeof(RockScatterCfg));
 
@@ -211,7 +210,7 @@ RockScatter::~RockScatter() {
   m_cache.clear();
 }
 
-// ---- Base clear zones ----
+// Base clear zones
 
 void RockScatter::LoadBaseClearZones() {
   m_clearZones.clear();
@@ -277,7 +276,7 @@ bool RockScatter::IsInClearZone(double lng, double lat) const {
   return false;
 }
 
-// ---- Rock generation ----
+// Rock generation
 
 const std::vector<RockInstance>&
 RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
@@ -350,7 +349,7 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   return rocks;
 }
 
-// ---- Raycast ----
+// Raycast
 
 float RockScatter::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
   float bestY = -1e30f;
@@ -376,7 +375,7 @@ float RockScatter::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
   return bestY;
 }
 
-// ---- Elevation modifier ----
+// Elevation modifier
 
 double RockScatter::GetElevationModifier(double lng, double lat) const {
   if (!m_cfg.bEnabled) return 0.0;
@@ -431,7 +430,7 @@ double RockScatter::GetElevationModifier(double lng, double lat) const {
   return maxElev;
 }
 
-// ---- Collision checking ----
+// Collisions
 
 RockScatter::CollisionResult
 RockScatter::CheckCollision(const VECTOR3 *hullPts, int nPts,
