@@ -1,0 +1,337 @@
+\documentclass[Orbiter Technical Reference.tex]{subfiles}
+\begin{document}
+
+\section{Mesh-to-mesh collision detection and response}
+\textbf{EvESpirit}\\
+\textbf{May 13, 2026}
+
+
+\subsection{Introduction}
+Orbiter newly implements a custom, yet using already pre-established techniques demonstrated with ~\cite{moller1997} and~\cite{ibarra2003} papers,
+mesh-accurate, rigid-body based collision system for vessel-to-vessel,
+vessel-to-base, and vessel-to-scatter (foilage or rocks - part of a new Scatterer system) interactions.
+Collision remains optionally toggleable for all three categories within Launchpad -> Options -> Physics settings.
+
+Collision detection uses a point-to-triangle intersection algorithm that is
+mathematically equivalent to the
+M\"oller-Trumbore ray-triangle intersection test~\cite{moller1997},
+but solved for a stationary point rather than a directed ray.
+Where M\"oller-Trumbore asks ``does this ray hit the triangle?'', the
+point-to-triangle variant asks ``is this point inside the triangle's
+projection?''.
+The collision \emph{response} is handled by a standard Newtonian rigid-body
+impulse solver~\cite{ibarra2003}, which computes normal and tangential
+impulses and applies them as linear and angular velocity changes.
+
+To maintain framerates that are relatively equivalent
+or only mildly affected within the simulation, the system is split into two phases:
+a \emph{broad phase} that cheaply discards non-colliding pairs, and a
+\emph{narrow phase} that performs the full geometric intersection test.
+
+
+\subsection{Broad phase - bounding-sphere rejection}
+\label{ssec:broadphase}
+Given two vessels $A$ and $B$ with bounding-sphere radii
+$r_A$ and $r_B$, the broad phase operates on their relative position and
+velocity vectors:
+\begin{equation*}
+\vec{p}_{\mathrm{rel}} = \vec{p}_B - \vec{p}_A, \qquad
+\vec{v}_{\mathrm{rel}} = \vec{v}_B - \vec{v}_A
+\end{equation*}
+The combined bounding radius is $r_{\Sigma} = r_A + r_B$.
+A pair is immediately discarded if the vessels are separating
+\emph{and} already well apart:
+\begin{equation*}
+\vec{p}_{\mathrm{rel}} \cdot \vec{v}_{\mathrm{rel}} \ge 0
+\;\;\text{and}\;\;
+|\vec{p}_{\mathrm{rel}}| > r_{\Sigma} + \epsilon
+\end{equation*}
+where $\epsilon$ is a small safety margin (5\,m in the initial implementation).
+
+The 5\,m value was chosen to be larger than typical vessel surface 
+irregularities ($\sim$1--2\,m for detailed meshes) while remaining small 
+enough to avoid premature engagement at long range. This prevents 
+false negatives when vessels have complex geometry that extends beyond 
+their geometric centers, while maintaining tight broad-phase culling.
+
+For approaching vessels ($\vec{p}_{\mathrm{rel}} \cdot \vec{v}_{\mathrm{rel}} < 0$),
+the time of closest approach is estimated as
+\begin{equation*}
+t_{\mathrm{min}} = -\frac{\vec{p}_{\mathrm{rel}} \cdot \vec{v}_{\mathrm{rel}}}
+                         {|\vec{v}_{\mathrm{rel}}|^2}
+\end{equation*}
+If $t_{\mathrm{min}}$ falls within the current simulation time step $\Delta t$,
+the predicted closest-approach distance is checked against $r_{\Sigma}$:
+\begin{equation*}
+|\vec{p}_{\mathrm{rel}} + \vec{v}_{\mathrm{rel}}\,t_{\mathrm{min}}|
+> r_{\Sigma} + \epsilon
+\;\;\Rightarrow\;\; \text{skip pair}
+\end{equation*}
+Only pairs that survive both tests proceed to the narrow phase.
+
+
+\subsection{Narrow phase - point-to-triangle intersection}
+\label{ssec:narrowphase}
+
+\subsubsection{Coordinate transformation}
+A cached \emph{point cloud} of hull vertices from vessel~$A$ is transformed
+into the local mesh space of vessel~$B$ using the composite rotation matrix
+$\mat{R} = \mat{R}_{\mathrm{planet}}^{-1}\,\mat{R}_{\mathrm{vessel}}$.
+The inverse transformation is also applied (hull of $B$ tested against
+meshes of~$A$) for symmetric detection.
+
+\subsubsection{AABB culling}
+Before any per-triangle test, an Axis-Aligned Bounding Box (AABB) overlap
+check is performed at two levels:
+
+\begin{enumerate}
+\item \textbf{Mesh group AABB.} The AABB of each mesh group in the target
+      vessel is compared against the AABB of the incoming hull point cloud.
+      Non-overlapping groups are skipped entirely.
+\item \textbf{Per-triangle AABB.} Each triangle's bounding box is tested
+against individual hull points. A small tolerance of 0.1\,m is added
+to both AABBs to account for numerical precision loss in the 
+coordinate transformations between vessel-local and mesh-local spaces.
+Without this tolerance, edge-case contacts (vertices exactly on AABB
+faces etc.) would be incorrectly culled due to floating-point rounding.
+\end{enumerate}
+
+\subsubsection{Point-in-triangle test via barycentric coordinates}
+\label{sssec:barycentric}
+For each triangle with vertices $\vec{p}_0$, $\vec{p}_1$, $\vec{p}_2$
+and a candidate hull point $\vec{q}$, define the edge vectors
+\begin{equation*}
+\vec{e}_1 = \vec{p}_1 - \vec{p}_0, \qquad
+\vec{e}_2 = \vec{p}_2 - \vec{p}_0
+\end{equation*}
+and the triangle face normal
+\begin{equation*}
+\hat{\vec{n}} = \frac{\vec{e}_1 \times \vec{e}_2}{|\vec{e}_1 \times \vec{e}_2|}
+\end{equation*}
+The signed distance from the point to the triangle plane is
+\begin{equation}
+d = (\vec{q} - \vec{p}_0) \cdot \hat{\vec{n}}
+\label{eq:signed_dist}
+\end{equation}
+Points with $d > 0.05\,\text{m}$ (outside) or $d < -2.0\,\text{m}$
+(too deep to be a contact event) are rejected. The 0.05\,m outer 
+threshold provides a predictive window, in which points approaching within this
+distance will likely penetrate in the next frame, allowing the broad 
+phase to keep the pair active. The -2.0\,m inner limit prevents 
+erroneously large impulses when tunneling has already occurred, and once
+penetration exceeds vessel-scale dimensions, position correction
+(Section~\ref{ssec:response}) is more appropriate than impulse response.
+Additionally, triangles whose normals face away from the relative velocity
+vector ($\vec{v}_{\mathrm{rel}} \cdot \hat{\vec{n}} > 0.1$) are skipped.
+The 0.1\,m/s threshold (rather than strict $> 0$) prevents oscillation
+when vessels are in sliding contact with nearly-tangential velocities;
+strictly back-facing surfaces ($\vec{v} \cdot \hat{n} \gg 0.1$) can be
+safely ignored, while surfaces within the threshold are kept active to
+handle impacts.
+
+The barycentric coordinates $(u, v, w)$ of the projected point are computed
+via the Gram matrix of the edge vectors:
+\begin{equation}
+\begin{aligned}
+d_{00} &= \vec{e}_1 \cdot \vec{e}_1, \quad
+d_{01} = \vec{e}_1 \cdot \vec{e}_2, \quad
+d_{11} = \vec{e}_2 \cdot \vec{e}_2 \\[4pt]
+d_{20} &= (\vec{q} - \vec{p}_0) \cdot \vec{e}_1, \quad
+d_{21} = (\vec{q} - \vec{p}_0) \cdot \vec{e}_2 \\[4pt]
+D &= d_{00}\,d_{11} - d_{01}^{\,2}
+\end{aligned}
+\label{eq:gram}
+\end{equation}
+The barycentric weights are then
+\begin{equation}
+v = \frac{d_{11}\,d_{20} - d_{01}\,d_{21}}{D}, \qquad
+w = \frac{d_{00}\,d_{21} - d_{01}\,d_{20}}{D}, \qquad
+u = 1 - v - w
+\label{eq:bary}
+\end{equation}
+A hit is registered when $u \ge -0.05$, $v \ge -0.05$, $w \ge -0.05$.
+The small negative tolerance (-0.05 $\approx$ 5\% of triangle edge length for
+typical meshes) accommodates two sources of error: (i) floating-point
+imprecision in the barycentric computation when points lie exactly on
+triangle edges, and (ii) slight coordinate misalignment from the
+dual-direction testing (hull A → mesh B AND hull B → mesh A).
+Without this tolerance, edge and vertex contacts would intermittently fail
+detection.
+The system tracks the deepest penetration depth $-d$ across all tested
+point-triangle pairs and records the corresponding surface normal and
+contact location.
+
+
+\subsection{Collision response - rigid-body impulse solver}
+\label{ssec:response}
+
+\subsubsection{Contact velocity}
+Once the deepest penetration point and surface normal $\hat{\vec{n}}$
+are known, the contact-point velocity for each vessel is computed
+including both linear and angular contributions:
+\begin{equation}
+\vec{v}_A^c = \vec{v}_A + \vec{\omega}_A \times \vec{r}_A, \qquad
+\vec{v}_B^c = \vec{v}_B + \vec{\omega}_B \times \vec{r}_B
+\label{eq:contact_vel}
+\end{equation}
+where $\vec{r}_A$ and $\vec{r}_B$ are the moment arms from each vessel's
+centre of mass to the contact point.
+The relative contact velocity is
+\begin{equation*}
+\vec{v}_{\mathrm{rel}}^c = \vec{v}_A^c - \vec{v}_B^c
+\end{equation*}
+and the component along the collision normal is
+\begin{equation*}
+v_n = \vec{v}_{\mathrm{rel}}^c \cdot \hat{\vec{n}}
+\end{equation*}
+If $v_n > 0$ the bodies are already separating and no impulse is applied.
+If $|v_n| > 500\,\text{m/s}$ a hypervelocity impact is declared and
+both vessels are destroyed.
+
+\subsubsection{Normal impulse magnitude}
+The impulse magnitude $j$ along the collision normal is computed as
+\begin{equation}
+j = \frac{-(1+e)\,v_n}
+     {\dfrac{1}{m_A} + \dfrac{1}{m_B}
+      + \bigl[(\mat{I}_A^{-1}(\vec{r}_A \times \hat{\vec{n}})) \times \vec{r}_A
+        + (\mat{I}_B^{-1}(\vec{r}_B \times \hat{\vec{n}})) \times \vec{r}_B\bigr]
+        \cdot \hat{\vec{n}}}
+\label{eq:impulse}
+\end{equation}
+where $e$ is the coefficient of restitution (0.2 for vessel-to-vessel,
+variable for vessel-to-base), $m_A$, $m_B$ are the vessel masses, and
+$\mat{I}_A^{-1}$, $\mat{I}_B^{-1}$ are the inverse inertia tensors
+expressed in the global frame.
+Because the system evaluates only a single deepest-penetration point
+per frame, the inverse inertia values are scaled by a factor of $0.5$
+to approximate multi-point contact and reduce rotational jitter.
+
+The denominator in Eq.~\ref{eq:impulse} can be decomposed for clarity.
+Define the \emph{angular effect} term:
+\begin{equation}
+\alpha = \bigl[(\mat{I}_A^{-1}\,\vec{c}_A) \times \vec{r}_A
+         + (\mat{I}_B^{-1}\,\vec{c}_B) \times \vec{r}_B\bigr]
+         \cdot \hat{\vec{n}}
+\label{eq:angular_effect}
+\end{equation}
+where $\vec{c}_A = \vec{r}_A \times \hat{\vec{n}}$ and
+$\vec{c}_B = \vec{r}_B \times \hat{\vec{n}}$.
+Then Eq.~\ref{eq:impulse} simplifies to
+\begin{equation}
+j = \frac{-(1+e)\,v_n}{\dfrac{1}{m_A} + \dfrac{1}{m_B} + \alpha}
+\label{eq:impulse_simple}
+\end{equation}
+
+\subsubsection{Applying the normal impulse}
+The velocity and angular velocity changes are
+\begin{equation}
+\begin{aligned}
+\Delta\vec{v}_A &= +\frac{j\,\hat{\vec{n}}}{m_A}, &\qquad
+\Delta\vec{v}_B &= -\frac{j\,\hat{\vec{n}}}{m_B} \\[4pt]
+\Delta\vec{\omega}_A &= +\mat{I}_A^{-1}\,\vec{c}_A\;j, &\qquad
+\Delta\vec{\omega}_B &= -\mat{I}_B^{-1}\,\vec{c}_B\;j
+\end{aligned}
+\label{eq:apply_impulse}
+\end{equation}
+
+\subsubsection{Tangential friction}
+The tangential component of the relative contact velocity is
+\begin{equation*}
+\vec{v}_t = \vec{v}_{\mathrm{rel}}^c - v_n\,\hat{\vec{n}}
+\end{equation*}
+A friction impulse is computed using the same impulse denominator structure
+as the normal case but along the tangent direction
+$\hat{\vec{t}} = \vec{v}_t / |\vec{v}_t|$:
+\begin{equation}
+j_t = \min\!\bigl(|\vec{v}_t|\,m_{\mathrm{eff}}^t,\;\mu\,j\bigr)
+\label{eq:friction}
+\end{equation}
+where $\mu$ is the Coulomb friction coefficient (0.6 for vessel-to-vessel)
+and $m_{\mathrm{eff}}^t$ is the effective mass in the tangential direction,
+computed analogously to the normal case.
+The friction impulse is capped by $\mu\,j$ (Coulomb's law) to prevent
+the tangential correction from reversing the sliding direction.
+
+For vessel-to-base collisions, wheel brakes are modelled by scaling $\mu$
+from a base value of 0.8 up to 2.8 at full brake application:
+\begin{equation*}
+\mu = 0.8 + 2.0\,b
+\end{equation*}
+where $b \in [0,1]$ is the average of left and right wheel brake levels.
+
+\subsubsection{Positional correction}
+After all impulses are applied, a direct positional correction
+pushes the interpenetrating bodies apart:
+\begin{equation}
+\begin{aligned}
+\Delta\vec{p}_A &= +\hat{\vec{n}}\,d_{\mathrm{pen}} \cdot 1.01 \cdot
+                    \frac{m_B}{m_A + m_B} \\[4pt]
+\Delta\vec{p}_B &= -\hat{\vec{n}}\,d_{\mathrm{pen}} \cdot 1.01 \cdot
+                    \frac{m_A}{m_A + m_B}
+\end{aligned}
+\label{eq:pos_correction}
+\end{equation}
+where $d_{\mathrm{pen}}$ is the measured penetration depth.
+The 1\% over-correction ($\times 1.01$) prevents persistent
+frame-to-frame interpenetration in two scenarios: (i) when vessels
+remain in contact across multiple frames (resting contact), accumulated
+floating-point drift can allow slow interpenetration growth - the slight
+push ensures separation; (ii) when the collision normal is nearly 
+tangent to curved surfaces, exact separation may leave points marginally
+inside the next adjacent triangle. The 1\% value was empirically tuned
+to eliminate jitter (smaller values allow persistent contact) without
+causing visible "bouncing" separation artifacts (larger values would).
+
+
+\subsection{Vessel-to-base collisions}
+\label{ssec:vessel_base}
+Vessel-to-base collisions follow the same narrow-phase point-to-triangle
+algorithm described in Section~\ref{ssec:narrowphase}.
+The base is treated as an immovable object, so the impulse solver
+simplifies: $m_B \to \infty$ and $\mat{I}_B^{-1} = \mat{0}$.
+The normal impulse reduces to
+\begin{equation*}
+j_n = -(1 + e)\,v_n
+\end{equation*}
+with $e = 0.1$ for impacts exceeding 0.5\,m/s and $e = 0$ for softer
+contacts to prevent resting-state jitter.
+
+Angular damping is applied when a vessel is nearly at rest on a surface
+($|v_n| < 0.5\,\text{m/s}$ and $d_{\mathrm{pen}} > 0.005\,\text{m}$):
+the angular velocity relative to the planet's surface rotation is reduced
+by 20\% per frame. This compensates for the single-contact-point
+approximation and prevents tipping oscillations by 20\% per frame.
+The 0.5\,m/s velocity threshold distinguishes  "resting" from "impacting" states,
+as below this speed, contacts are  treated as static friction scenarios requiring stabilization; above it,
+normal restitution physics apply. The 0.005\,m penetration requirement
+ensures damping only activates when meaningful surface contact exists,
+preventing false activation during grazing trajectories. The 20\% 
+damping rate (rather than aggressive 50%+ or conservative 5%) balances
+two competing needs: fast convergence to rest (achieved in $\sim$10 frames)
+versus smooth, artifact-free motion during slow rolling.
+
+
+\subsection{Base configuration - the COLLISION marker}
+\label{ssec:cfg_collision}
+Base configuration files (\texttt{.cfg}) can optionally flag individual
+mesh entries for collision detection using the \texttt{COLLISION} keyword.
+If a mesh block does not contain this marker, no collision check is
+performed against it (preserving legacy behaviour).
+
+\begin{lstlisting}[language=OSFS]
+HANGAR
+  POS 0 0 0
+  ROT 90
+  SCALE 12 8 244
+  TEX1 concrete1 0.4 0.4
+  TEX3 concrete1 0.5 8
+  COLLISION
+END
+\end{lstlisting}
+
+The \texttt{COLLISION} keyword can appear anywhere within the mesh block
+between its header and the closing \texttt{END} statement.
+Multiple mesh entries in the same base configuration may independently
+use or omit the marker.
+
+\end{document}
