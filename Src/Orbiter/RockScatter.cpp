@@ -16,6 +16,97 @@
 
 extern Orbiter *g_pOrbiter;
 
+#pragma pack(push,1)
+struct DDS_PIXELFORMAT {
+    uint32_t dwSize;
+    uint32_t dwFlags;
+    uint32_t dwFourCC;
+    uint32_t dwRGBBitCount;
+    uint32_t dwRBitMask;
+    uint32_t dwGBitMask;
+    uint32_t dwBBitMask;
+    uint32_t dwABitMask;
+};
+
+struct DDS_HEADER {
+    uint32_t dwSize;
+    uint32_t dwFlags;
+    uint32_t dwHeight;
+    uint32_t dwWidth;
+    uint32_t dwPitchOrLinearSize;
+    uint32_t dwDepth;
+    uint32_t dwMipMapCount;
+    uint32_t dwReserved1[11];
+    DDS_PIXELFORMAT ddspf;
+    uint32_t dwCaps;
+    uint32_t dwCaps2;
+    uint32_t dwCaps3;
+    uint32_t dwCaps4;
+    uint32_t dwReserved2;
+};
+#pragma pack(pop)
+
+static void DecodeDXT1Pixel(const uint8_t *data, int width, int x, int y, uint8_t &r, uint8_t &g, uint8_t &b) {
+    int bx = x / 4, by = y / 4, bw = width / 4;
+    const uint8_t *block = data + (by * bw + bx) * 8;
+    uint16_t c0 = *(const uint16_t*)(block + 0);
+    uint16_t c1 = *(const uint16_t*)(block + 2);
+    uint32_t bits = *(const uint32_t*)(block + 4);
+    int cx = x % 4, cy = y % 4, bit_idx = (cy * 4 + cx) * 2;
+    uint32_t code = (bits >> bit_idx) & 3;
+    int r0 = ((c0 >> 11) & 31) * 255 / 31, g0 = ((c0 >> 5) & 63) * 255 / 63, b0 = (c0 & 31) * 255 / 31;
+    int r1 = ((c1 >> 11) & 31) * 255 / 31, g1 = ((c1 >> 5) & 63) * 255 / 63, b1 = (c1 & 31) * 255 / 31;
+    if (c0 > c1) {
+        if (code == 0) { r=r0; g=g0; b=b0; } else if (code == 1) { r=r1; g=g1; b=b1; }
+        else if (code == 2) { r=(2*r0+r1)/3; g=(2*g0+g1)/3; b=(2*b0+b1)/3; } else { r=(r0+2*r1)/3; g=(g0+2*g1)/3; b=(b0+2*b1)/3; }
+    } else {
+        if (code == 0) { r=r0; g=g0; b=b0; } else if (code == 1) { r=r1; g=g1; b=b1; }
+        else if (code == 2) { r=(r0+r1)/2; g=(g0+g1)/2; b=(b0+b1)/2; } else { r=0; g=0; b=0; }
+    }
+}
+
+static void GetPixelRGB(const RockScatter::RockTileData &td, int x, int y, uint8_t &r, uint8_t &g, uint8_t &b) {
+    if (!td.data) { r = 255; g = 128; b = 0; return; }
+    if (x < 0) x = 0; if (x >= td.width) x = td.width - 1;
+    if (y < 0) y = 0; if (y >= td.height) y = td.height - 1;
+    if (td.isDXT1) {
+        DecodeDXT1Pixel(td.data, td.width, x, y, r, g, b);
+    } else if (td.isDXT5) {
+        int bx = x / 4, by = y / 4, bw = td.width / 4;
+        const uint8_t *block = td.data + (by * bw + bx) * 16 + 8;
+        uint16_t c0 = *(const uint16_t*)(block + 0);
+        uint16_t c1 = *(const uint16_t*)(block + 2);
+        uint32_t bits = *(const uint32_t*)(block + 4);
+        int cx = x % 4, cy = y % 4, bit_idx = (cy * 4 + cx) * 2;
+        uint32_t code = (bits >> bit_idx) & 3;
+        int r0 = ((c0 >> 11) & 31) * 255 / 31, g0 = ((c0 >> 5) & 63) * 255 / 63, b0 = (c0 & 31) * 255 / 31;
+        int r1 = ((c1 >> 11) & 31) * 255 / 31, g1 = ((c1 >> 5) & 63) * 255 / 63, b1 = (c1 & 31) * 255 / 31;
+        if (code == 0) { r=r0; g=g0; b=b0; } else if (code == 1) { r=r1; g=g1; b=b1; }
+        else if (code == 2) { r=(2*r0+r1)/3; g=(2*g0+g1)/3; b=(2*b0+b1)/3; } else { r=(r0+2*r1)/3; g=(g0+2*g1)/3; b=(b0+2*b1)/3; }
+    } else if (td.bpp > 0) {
+        uint32_t pixel = 0;
+        int idx = (y * td.width + x) * td.bpp;
+        if (td.bpp == 1) pixel = td.data[idx];
+        else if (td.bpp == 2) pixel = *(const uint16_t*)(td.data + idx);
+        else if (td.bpp == 3) pixel = td.data[idx] | (td.data[idx+1]<<8) | (td.data[idx+2]<<16);
+        else if (td.bpp == 4) pixel = *(const uint32_t*)(td.data + idx);
+        
+        if (td.bpp == 1) {
+            r = g = b = (uint8_t)pixel;
+        } else {
+            auto getVal = [](uint32_t px, uint32_t mask) -> uint8_t {
+                if (!mask) return 0;
+                int shift = 0; uint32_t m = mask;
+                while ((m & 1) == 0) { m >>= 1; shift++; }
+                return (uint8_t)(((px & mask) >> shift) * 255 / m);
+            };
+            r = getVal(pixel, td.rMask);
+            g = getVal(pixel, td.gMask);
+            b = getVal(pixel, td.bMask);
+        }
+    }
+}
+
 // ---- PRNG helpers ----
 
 uint32_t RockScatter::HashTile(uint32_t seed, int lvl, int ilat, int ilng) {
@@ -188,10 +279,22 @@ RockScatter::RockScatter(Planet *planet)
     : m_planet(planet), m_seed(0) {
   memset(&m_cfg, 0, sizeof(m_cfg));
   m_meshCount[0] = m_meshCount[1] = m_meshCount[2] = 0;
+  m_rockTreeMgr = nullptr;
+  m_bRockDirExists = false;
 
   // Read config from planet - it must have been parsed already
   // (Planet stores it in RockCfg)
   memcpy(&m_cfg, &planet->RockCfg, sizeof(RockScatterCfg));
+
+  char cbuf[256], path[256], fname[256];
+  if (planet->Name()) {
+    g_pOrbiter->Cfg()->PTexPath(cbuf, planet->Name());
+    m_rockTreeMgr = ZTreeMgr::CreateFromFile(cbuf, ZTreeMgr::LAYER_ROCK);
+    sprintf(fname, "%s\\Rock", planet->Name());
+    g_pOrbiter->Cfg()->PTexPath(path, fname);
+    DWORD attr = GetFileAttributesA(path);
+    m_bRockDirExists = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+  }
 
   const char *name = planet->Name();
   uint32_t h = 5381u;
@@ -208,6 +311,14 @@ RockScatter::RockScatter(Planet *planet)
 RockScatter::~RockScatter() {
   std::lock_guard<std::mutex> lock(m_cacheMutex);
   m_cache.clear();
+  for (auto &pair : m_mapCache) {
+      if (pair.second.originalData) {
+          if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(pair.second.originalData);
+          else delete [] pair.second.originalData;
+      }
+  }
+  m_mapCache.clear();
+  if (m_rockTreeMgr) delete m_rockTreeMgr;
 }
 
 // Base clear zones
@@ -278,6 +389,88 @@ bool RockScatter::IsInClearZone(double lng, double lat) const {
 
 // Rock generation
 
+void RockScatter::LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &tileData) const {
+  BYTE *buf = nullptr;
+  DWORD size = 0;
+  
+  int cur_lvl = lvl;
+  int cur_ilat = ilat;
+  int cur_ilng = ilng;
+
+  while (cur_lvl >= 0) {
+      if (m_bRockDirExists) {
+          char fname[256], path[256];
+          sprintf(fname, "%s\\Rock\\%02d\\%06d\\%06d.dds", m_planet->Name(), cur_lvl, cur_ilat, cur_ilng);
+          g_pOrbiter->Cfg()->PTexPath(path, fname);
+          FILE *f = fopen(path, "rb");
+          if (f) {
+              fseek(f, 0, SEEK_END);
+              size = ftell(f);
+              fseek(f, 0, SEEK_SET);
+              if (size > 0) {
+                  buf = new BYTE[size];
+                  fread(buf, 1, size, f);
+              }
+              fclose(f);
+          }
+      }
+      
+      if (!buf && m_rockTreeMgr) {
+          // Rock map directory levels are offset by 4 from ZTreeMgr quadtree levels:
+          // Dir level 0 (1 lat x 2 lng) = tree level 4 (rootPos4)
+          size = m_rockTreeMgr->ReadData(cur_lvl + 4, cur_ilat, cur_ilng, &buf);
+      }
+      
+      if (buf) break; // Successfully found a tile
+      
+      // Fallback to parent level
+      cur_lvl--;
+      cur_ilat /= 2;
+      cur_ilng /= 2;
+  }
+  
+  if (!buf) return;
+
+  tileData.lvl_loaded = cur_lvl;
+  tileData.ilat_loaded = cur_ilat;
+  tileData.ilng_loaded = cur_ilng;
+  
+  // Parse DDS header
+  if (size > 128 && memcmp(buf, "DDS ", 4) == 0) {
+      DDS_HEADER *hdr = (DDS_HEADER*)(buf + 4);
+      tileData.width = hdr->dwWidth;
+      tileData.height = hdr->dwHeight;
+      tileData.originalData = buf;
+      tileData.data = buf; // retain ownership
+      
+      uint32_t flags = hdr->ddspf.dwFlags;
+      if (flags & 0x4) { // DDPF_FOURCC
+          uint32_t fcc = hdr->ddspf.dwFourCC;
+          if (fcc == 0x31545844) tileData.isDXT1 = true; // DXT1
+          else if (fcc == 0x35545844) tileData.isDXT5 = true; // DXT5
+          tileData.data = buf + 128;
+      } else if (flags & 0x40) { // DDPF_RGB
+          tileData.bpp = hdr->ddspf.dwRGBBitCount / 8;
+          tileData.rMask = hdr->ddspf.dwRBitMask;
+          tileData.gMask = hdr->ddspf.dwGBitMask;
+          tileData.bMask = hdr->ddspf.dwBBitMask;
+          tileData.aMask = hdr->ddspf.dwABitMask;
+          tileData.data = buf + 128;
+      } else {
+          // Unsupported DDS format
+          if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(buf);
+          else delete [] buf;
+          tileData.data = nullptr;
+          tileData.originalData = nullptr;
+      }
+  } else {
+      if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(buf);
+      else delete [] buf;
+      tileData.data = nullptr;
+      tileData.originalData = nullptr;
+  }
+}
+
 const std::vector<RockInstance>&
 RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   TileKey key = {lvl, ilat, ilng};
@@ -306,22 +499,82 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   float density = m_cfg.fDensity * densityMult;
 
   int nRocks = (int)(density * areaM2);
-  if (nRocks > 2000) nRocks = 2000;
+  if (nRocks > 5000) nRocks = 5000;
   if (nRocks <= 0) return rocks;
 
   uint32_t rng = HashTile(m_seed, lvl, ilat, ilng);
   rocks.reserve(nRocks);
 
   for (int i = 0; i < nRocks; i++) {
-    RockInstance rock;
     double lat = latMin + RandFloat(rng) * (latMax - latMin);
     double lng = lngMin + RandFloat(rng) * tileSize;
 
+    RockTileData td;
+    {
+      auto mt = m_mapCache.find(key);
+      if (mt == m_mapCache.end()) {
+          LoadRockMapTile(lvl, ilat, ilng, td);
+          m_mapCache[key] = td;
+      } else {
+          td = mt->second;
+      }
+    }
+    
+    uint8_t red = 255, green = 127, blue = 0;
+    if (td.data) {
+        // Calculate the exact world bounds of the loaded parent tile
+        double td_tileSize = PI / double(1 << td.lvl_loaded);
+        double td_latMax = PI * 0.5 - td_tileSize * td.ilat_loaded;
+        double td_lngMin = -PI + td_tileSize * td.ilng_loaded;
+
+        float tx = (float)((lng - td_lngMin) / td_tileSize);
+        float ty = (float)((td_latMax - lat) / td_tileSize);
+        int px = (int)(tx * td.width);
+        int py = (int)(ty * td.height);
+        GetPixelRGB(td, px, py, red, green, blue);
+        
+        if (i == 0) {
+            char logbuf[256];
+            sprintf(logbuf, "RockScatter Debug: req_lvl=%d, loaded_lvl=%d, tx=%.3f, ty=%.3f, px=%d, py=%d, red=%d, nRocks=%d", lvl, td.lvl_loaded, tx, ty, px, py, red, nRocks);
+            oapiWriteLog(logbuf);
+        }
+    } else if (i == 0) {
+        char logbuf[256];
+        sprintf(logbuf, "RockScatter Debug: req_lvl=%d, NO DATA LOADED", lvl);
+        oapiWriteLog(logbuf);
+    }
+    
+    // Determine probability based on quadtree presence
+    float prob = 1.0f;
+    if (m_bRockDirExists || m_rockTreeMgr) {
+        // Base floor: 25% probability everywhere (the Moon almost always has scatter).
+        // Map data adds up to 75% more, using sqrt() to stretch the compressed low-end
+        // Diviner values into visible density differences. The densest areas hit 100%.
+        const float BASE_PROB = 0.25f;
+        if (td.data) {
+            float mapFactor = sqrtf(red / 91.0f);
+            if (mapFactor > 1.0f) mapFactor = 1.0f;
+            prob = BASE_PROB + (1.0f - BASE_PROB) * mapFactor;
+        }
+        else {
+            // Missing tile = barren mare plain
+            prob = 0.08f;
+        }
+    }
+    
+    if (RandFloat(rng) > prob) {
+        continue;
+    }
+
+    RockInstance rock;
     double clat = cos(lat), slat = sin(lat), clng = cos(lng), slng = sin(lng);
     rock.localPos = _V(clat * clng, slat, clat * slng);
     rock.elevation = (float)oapiSurfaceElevation((OBJHANDLE)m_planet, lng, lat);
 
+    // We only have a 1-channel density map, so rely on the procedural engine's
+    // uniform distribution logic for the rock size class sorting.
     float r = RandFloat(rng);
+    
     if (r < m_cfg.fRatioSmall) {
       rock.sizeClass = 0;
       rock.scale = RandRange(rng, m_cfg.fSizeSmall[0], m_cfg.fSizeSmall[1]);

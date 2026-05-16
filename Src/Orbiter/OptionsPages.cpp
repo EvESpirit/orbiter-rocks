@@ -478,8 +478,8 @@ void OptionsPage_Visual::UpdateControls(HWND hPage)
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_SURFACEROCKS, BM_SETCHECK,
 		Cfg()->CfgVisualPrm.bSurfaceRocks ? BST_CHECKED : BST_UNCHECKED, 0);
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETPOS, TRUE,
-		(LPARAM)(int)(Cfg()->CfgVisualPrm.fRockDensityMult * 100.0f));
-	sprintf(cbuf, "%d", (int)(Cfg()->CfgVisualPrm.fRockDensityMult * 100.0f));
+		(LPARAM)(int)(Cfg()->CfgVisualPrm.fRockDensityMult * 400.0f));
+	sprintf(cbuf, "%d", (int)(Cfg()->CfgVisualPrm.fRockDensityMult * 400.0f));
 	SetWindowText(GetDlgItem(hPage, IDC_OPT_VIS_ROCKDENSITY_TXT), cbuf);
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETPOS, TRUE,
 		(LPARAM)(int)Cfg()->CfgVisualPrm.fRockMaxDist);
@@ -523,7 +523,7 @@ void OptionsPage_Visual::UpdateConfig(HWND hPage)
 	Cfg()->SetAmbientLevel(i);
 
 	Cfg()->CfgVisualPrm.bSurfaceRocks = (SendDlgItemMessage(hPage, IDC_OPT_VIS_SURFACEROCKS, BM_GETCHECK, 0, 0) == BST_CHECKED);
-	Cfg()->CfgVisualPrm.fRockDensityMult = (float)SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_GETPOS, 0, 0) / 100.0f;
+	Cfg()->CfgVisualPrm.fRockDensityMult = (float)SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_GETPOS, 0, 0) / 400.0f;
 	Cfg()->CfgVisualPrm.fRockMaxDist = (float)SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_GETPOS, 0, 0);
 }
 
@@ -536,15 +536,15 @@ BOOL OptionsPage_Visual::OnInitDialog(HWND hPage, WPARAM wParam, LPARAM lParam)
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ELEVMODE, CB_ADDSTRING, 0, (LPARAM)"linear interpolation");
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ELEVMODE, CB_ADDSTRING, 0, (LPARAM)"cubic interpolation");
 
-	// Rock density multiplier trackbar: 10% to 125%
-	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETRANGEMIN, FALSE, 10);
-	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETRANGEMAX, FALSE, 125);
+	// Rock density multiplier trackbar: 5% to 100%
+	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETRANGEMIN, FALSE, 5);
+	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETRANGEMAX, FALSE, 100);
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETTICFREQ, 25, 0);
 
-	// Render distance trackbar: 10m to 5000m
+	// Render distance trackbar: 10m to 20000m
 	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETRANGEMIN, FALSE, 10);
-	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETRANGEMAX, FALSE, 5000);
-	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETTICFREQ, 500, 0);
+	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETRANGEMAX, FALSE, 20000);
+	SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETTICFREQ, 2000, 0);
 
 	return TRUE;
 }
@@ -731,9 +731,9 @@ BOOL OptionsPage_Visual::OnCommand(HWND hPage, WORD ctrlId, WORD notification, H
 				int val;
 				GetWindowText(GetDlgItem(hPage, IDC_OPT_VIS_ROCKDENSITY_TXT), cbuf, 16);
 				if (sscanf(cbuf, "%d", &val) == 1) {
-					if (val < 10) val = 10;
-					if (val > 125) val = 125;
-					Cfg()->CfgVisualPrm.fRockDensityMult = (float)val / 100.0f;
+					if (val < 5) val = 5;
+					if (val > 100) val = 100;
+					Cfg()->CfgVisualPrm.fRockDensityMult = (float)val / 400.0f;
 					SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_SETPOS, TRUE, (LPARAM)val);
 				}
 				return FALSE;
@@ -747,7 +747,7 @@ BOOL OptionsPage_Visual::OnCommand(HWND hPage, WORD ctrlId, WORD notification, H
 				GetWindowText(GetDlgItem(hPage, IDC_OPT_VIS_ROCKDIST_TXT), cbuf, 16);
 				if (sscanf(cbuf, "%d", &val) == 1) {
 					if (val < 10) val = 10;
-					if (val > 5000) val = 5000;
+					if (val > 20000) val = 20000;
 					Cfg()->CfgVisualPrm.fRockMaxDist = (float)val;
 					SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDIST, TBM_SETPOS, TRUE, (LPARAM)val);
 				}
@@ -766,7 +766,7 @@ BOOL OptionsPage_Visual::OnHScroll(HWND hPage, WPARAM wParam, LPARAM lParam)
 	char cbuf[32];
 	if ((HWND)lParam == GetDlgItem(hPage, IDC_OPT_VIS_ROCKDENSITY)) {
 		int pos = (int)SendDlgItemMessage(hPage, IDC_OPT_VIS_ROCKDENSITY, TBM_GETPOS, 0, 0);
-		Cfg()->CfgVisualPrm.fRockDensityMult = (float)pos / 100.0f;
+		Cfg()->CfgVisualPrm.fRockDensityMult = (float)pos / 400.0f;
 		sprintf(cbuf, "%d", pos);
 		SetWindowText(GetDlgItem(hPage, IDC_OPT_VIS_ROCKDENSITY_TXT), cbuf);
 		return FALSE;

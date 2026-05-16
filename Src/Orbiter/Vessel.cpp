@@ -9006,8 +9006,15 @@ double VESSEL::GetThrusterIsp0 (THRUSTER_HANDLE th) const
 
 void VESSEL::SetThrusterResource (THRUSTER_HANDLE th, PROPELLANT_HANDLE ph) const
 {
+	char logbuf[256];
+	sprintf(logbuf, "VESSEL::SetThrusterResource: th=%p, ph=%p", th, ph);
+	oapiWriteLog(logbuf);
 	((ThrustSpec*)th)->tank = (TankSpec*)ph;
-	if (!ph) SetThrusterLevel (th, 0);
+	if (!ph) {
+		oapiWriteLog("VESSEL::SetThrusterResource: Calling SetThrusterLevel(th, 0)");
+		SetThrusterLevel (th, 0);
+	}
+	oapiWriteLog("VESSEL::SetThrusterResource: finished");
 }
 
 PROPELLANT_HANDLE VESSEL::GetThrusterResource (THRUSTER_HANDLE th) const
@@ -9020,8 +9027,18 @@ void VESSEL::SetThrusterLevel (THRUSTER_HANDLE th, double level) const
 	if (vessel->bFRplayback) return;
 	ThrustSpec *ts = (ThrustSpec*)th;
 	ts->level_permanent = level;
+	
+	char logbuf[256];
+	sprintf(logbuf, "VESSEL::SetThrusterLevel: ts=%p, level=%f, tank=%p", ts, level, ts->tank);
+	oapiWriteLog(logbuf);
+
 	if (ts->tank && ts->tank->mass)
 		ts->level = min (1.0, ts->level_permanent + ts->level_override);
+	else
+		ts->level = 0.0;
+		
+	sprintf(logbuf, "VESSEL::SetThrusterLevel: ts->level set to %f", ts->level);
+	oapiWriteLog(logbuf);
 }
 
 void VESSEL::IncThrusterLevel (THRUSTER_HANDLE th, double dlevel) const
@@ -9032,13 +9049,19 @@ void VESSEL::IncThrusterLevel (THRUSTER_HANDLE th, double dlevel) const
 	ts->level_permanent = max (0.0, min (1.0, ts->level_permanent));
 	if (ts->tank && ts->tank->mass)
 		ts->level = max (0.0, min (1.0, ts->level_permanent + ts->level_override));
+	else
+		ts->level = 0.0;
 }
 
 void VESSEL::SetThrusterLevel_SingleStep (THRUSTER_HANDLE th, double level) const
 {
 	if (vessel->bFRplayback) return;
 	ThrustSpec *ts = (ThrustSpec*)th;
-	ts->level_override = ts->level = max (0.0, min (1.0, level));
+	ts->level_override = max (0.0, min (1.0, level));
+	if (ts->tank && ts->tank->mass)
+		ts->level = min (1.0, ts->level_permanent + ts->level_override);
+	else
+		ts->level = 0.0;
 }
 
 void VESSEL::IncThrusterLevel_SingleStep (THRUSTER_HANDLE th, double dlevel) const
@@ -9048,6 +9071,8 @@ void VESSEL::IncThrusterLevel_SingleStep (THRUSTER_HANDLE th, double dlevel) con
 	ts->level_override += dlevel;
 	if (ts->tank && ts->tank->mass)
 		ts->level = min (1.0, ts->level_permanent + ts->level_override);
+	else
+		ts->level = 0.0;
 }
 
 double VESSEL::GetThrusterLevel (THRUSTER_HANDLE th) const

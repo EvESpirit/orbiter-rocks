@@ -431,7 +431,7 @@ Planet::Planet (char *fname)
 
 		// Only parse the rest if the key was found AND set to true
 		if (foundKey && RockCfg.bEnabled) {
-			RockCfg.fDrawDist     = 500.0f;
+			RockCfg.fDrawDist     = 20000.0f;
 			RockCfg.fDensity      = 0.01f;
 			RockCfg.fSizeSmall[0] = 0.1f;  RockCfg.fSizeSmall[1]  = 0.5f;
 			RockCfg.fSizeMedium[0]= 0.5f;  RockCfg.fSizeMedium[1] = 2.0f;

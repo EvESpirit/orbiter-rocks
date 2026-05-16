@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include "ZTreeMgr.h"
 
 #define MAX_CLEAR_AREAS_PER_BASE 32
 
@@ -66,6 +67,20 @@ public:
     return m_meshBottomExtent[sizeClass];
   }
 
+public:
+  struct RockTileData {
+    uint8_t *data;
+    uint8_t *originalData;
+    int width, height;
+    int bpp;
+    uint32_t rMask, gMask, bMask, aMask;
+    bool isDXT1;
+    bool isDXT5;
+    int lvl_loaded, ilat_loaded, ilng_loaded;
+
+    RockTileData() : data(nullptr), originalData(nullptr), width(0), height(0), bpp(0), rMask(0), gMask(0), bMask(0), aMask(0), isDXT1(false), isDXT5(false), lvl_loaded(0), ilat_loaded(0), ilng_loaded(0) {}
+  };
+
 private:
   struct TileKey {
     int lvl, ilat, ilng;
@@ -73,6 +88,8 @@ private:
       return lvl == o.lvl && ilat == o.ilat && ilng == o.ilng;
     }
   };
+
+
 
   struct TileKeyHash {
     size_t operator()(const TileKey &k) const {
@@ -91,6 +108,7 @@ private:
   void LoadBaseClearZones();
   bool IsInClearZone(double lng, double lat) const;
   void BuildCollisionGeometry();
+  void LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &tileData) const;
 
   static uint32_t HashTile(uint32_t seed, int lvl, int ilat, int ilng);
   static uint32_t XorShift32(uint32_t &state);
@@ -108,6 +126,10 @@ private:
 
   mutable std::mutex m_cacheMutex;
   mutable std::unordered_map<TileKey, std::vector<RockInstance>, TileKeyHash> m_cache;
+  mutable std::unordered_map<TileKey, RockTileData, TileKeyHash> m_mapCache;
+
+  ZTreeMgr *m_rockTreeMgr;
+  bool m_bRockDirExists;
 
   uint32_t m_seed;
   std::vector<ClearZone> m_clearZones;

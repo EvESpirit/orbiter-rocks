@@ -443,6 +443,8 @@ public:
 			ts->level_permanent = level;
 			if (ts->tank && ts->tank->mass)
 				ts->level = std::max(0.0, std::min(1.0, ts->level+dlevel));
+			else
+				ts->level = 0.0;
 		}
 	}
 	// set the permanent level for a thruster (0-1)
@@ -454,6 +456,8 @@ public:
 			ts->level_permanent = std::max(0.0, std::min(1.0, ts->level_permanent));
 			if (ts->tank && ts->tank->mass)
 				ts->level = std::max(0.0, std::min(1.0, ts->level+dlevel));
+			else
+				ts->level = 0.0;
 		}
 	}
 
@@ -463,6 +467,8 @@ public:
 		ts->level_permanent = level;
 		if (ts->tank && ts->tank->mass)
 			ts->level = std::max(0.0, std::min(1.0, ts->level+dlevel));
+		else
+			ts->level = 0.0;
 
 	}
 	// set permanent thruster level during playback
