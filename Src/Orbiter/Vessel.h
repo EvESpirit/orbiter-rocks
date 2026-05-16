@@ -1730,7 +1730,7 @@ private:
 	void UpdateHullCacheP();            // update m_hullCacheP from m_hullCache
 	void CheckBaseCollisions(class Planet *pp);
 	void ResolveCollisionWith(Vessel *v);
-	bool CheckMeshCollision(const class Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &vPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res);
+	bool CheckMeshCollision(const class Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &vPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res, const std::vector<Vector>* dockPtsP = nullptr);
 
 	UINT exhaust_id;   // next exhaust id to attach
 

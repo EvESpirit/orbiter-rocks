@@ -4878,7 +4878,7 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 	}
 }
 
-bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &meshPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res) {
+bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, const VECTOR3 &meshPosPlanet, const Vector &vRelPlanet, BaseCollisionResult &res, const std::vector<Vector>* dockPtsP) {
 	if (!m || m_hullCacheP.empty()) return false;
 	res.hit = false;
 	double deepestPen = 0.0;
@@ -4973,6 +4973,18 @@ bool Vessel::CheckMeshCollision(const Mesh *m, const Matrix &M_mesh2planet, cons
 				if (hp_m.x < tmin_x || hp_m.x > tmax_x ||
 					hp_m.y < tmin_y || hp_m.y > tmax_y ||
 					hp_m.z < tmin_z || hp_m.z > tmax_z) continue;
+
+				if (dockPtsP) {
+					Vector hp_P = Vector(meshPosPlanet.x, meshPosPlanet.y, meshPosPlanet.z) + mul(M_mesh2planet, hp_m);
+					bool nearDock = false;
+					for (const Vector& dP : *dockPtsP) {
+						if (dP.dist2(hp_P) < 4.0) { // 2.0 meters radius
+							nearDock = true;
+							break;
+						}
+					}
+					if (nearDock) continue;
+				}
 
 				double d = dotp(hp_m - p0, n);
 				if (d > 0.05 || d < -2.0) continue;
@@ -5078,6 +5090,11 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 	
 	if (supervessel && supervessel == v->supervessel) return; // Skip docked vessels
 
+	// Post-undock grace period: skip collision for 5 seconds after undocking
+	// to allow the separation push to clear the vessels' overlapping meshes.
+	extern TimeData td;
+	if (td.SimT1 < undock_t + 5.0 || td.SimT1 < v->undock_t + 5.0) return;
+
 	// Relative velocity and position
 	Vector pRel = v->s1->pos - s1->pos;
 	Vector vRel = v->s1->vel - s1->vel;
@@ -5087,13 +5104,17 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 	double dir = dotp(pRel, vRel);
 	if (dir >= 0.0 && pRel.length() > rsum + 5.0) return; // Moving apart
 
-	extern TimeData td;
-	double t = -dir / vRel.length2();
-	if (t > 0.0 && t < td.SimDT) {
-		Vector closestApproach = pRel + (vRel * t);
-		if (closestApproach.length() > rsum + 5.0) return; // Missed
+	double vRelLen2 = vRel.length2();
+	if (vRelLen2 > 1e-12) {
+		double t = -dir / vRelLen2;
+		if (t > 0.0 && t < td.SimDT) {
+			Vector closestApproach = pRel + (vRel * t);
+			if (closestApproach.length() > rsum + 5.0) return; // Missed
+		} else {
+			if (pRel.length() > rsum + 5.0) return; // Did not overlap at start or end of frame
+		}
 	} else {
-		if (pRel.length() > rsum + 5.0) return; // Did not overlap at start or end of frame
+		if (pRel.length() > rsum + 5.0) return; // Stationary relative to each other, not overlapping
 	}
 
 	// Drop time warp if we are close to collision
@@ -5104,8 +5125,21 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 	UpdateHullCacheP();
 	if (m_hullCacheP.empty()) return;
 
-	Planet *pp = (Planet*)proxyplanet;
+	Planet* pp = (Planet*)proxyplanet;
+	std::vector<Vector> dockPtsA;
+	for (DWORD i = 0; i < ndock; i++) {
+		Vector dP = s1->pos - pp->s1->pos + mul(s1->R, dock[i]->ref);
+		dP.Set(tmul(pp->s1->R, dP));
+		dockPtsA.push_back(dP);
+	}
 	
+	std::vector<Vector> dockPtsB;
+	for (DWORD i = 0; i < v->ndock; i++) {
+		Vector dP = v->s1->pos - pp->s1->pos + mul(v->s1->R, v->dock[i]->ref);
+		dP.Set(tmul(pp->s1->R, dP));
+		dockPtsB.push_back(dP);
+	}
+
 	BaseCollisionResult bestRes;
 	bestRes.hit = false;
 	bestRes.depth = 0;
@@ -5127,7 +5161,7 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 		VECTOR3 mPosP = { (float)(posB_P.x + meshOfsP.x), (float)(posB_P.y + meshOfsP.y), (float)(posB_P.z + meshOfsP.z) };
 
 		BaseCollisionResult res;
-		if (CheckMeshCollision(m, M_B2p, mPosP, vRel_AvsB, res)) {
+		if (CheckMeshCollision(m, M_B2p, mPosP, vRel_AvsB, res, &dockPtsB)) {
 			if (!bestRes.hit || res.depth > bestRes.depth) {
 				bestRes = res;
 				bestResFromB = false;
@@ -5153,7 +5187,7 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 			VECTOR3 mPosP = { (float)(posA_P.x + meshOfsP.x), (float)(posA_P.y + meshOfsP.y), (float)(posA_P.z + meshOfsP.z) };
 
 			BaseCollisionResult res;
-			if (v->CheckMeshCollision(m, M_A2p, mPosP, vRel_BvsA, res)) {
+			if (v->CheckMeshCollision(m, M_A2p, mPosP, vRel_BvsA, res, &dockPtsA)) {
 				if (!bestRes.hit || res.depth > bestRes.depth) {
 					// The normal from CheckMeshCollision points OUT of A's mesh (towards B).
 					// To maintain the convention "normal points from B to A", we must negate it.
@@ -5181,8 +5215,11 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 		Vector rA = contactPtGlobal - s1->pos;
 		Vector rB = contactPtGlobal - v->s1->pos;
 		
-		Vector velA = s1->vel + crossp(s1->omega, rA);
-		Vector velB = v->s1->vel + crossp(v->s1->omega, rB);
+		// s1->omega is in body-local frame; transform to global for crossp with global-frame lever arms
+		Vector omegaA_global = mul(s1->R, s1->omega);
+		Vector omegaB_global = mul(v->s1->R, v->s1->omega);
+		Vector velA = s1->vel + crossp(omegaA_global, rA);
+		Vector velB = v->s1->vel + crossp(omegaB_global, rB);
 		Vector vRelContact = velA - velB;
 
 		double relVelAlongNormal = dotp(vRelContact, normGlobal);
@@ -5222,6 +5259,7 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 		Vector impulse = normGlobal * j;
 		Vector deltaVelA = impulse / Mass();
 		Vector deltaVelB = -(impulse / v->Mass());
+		// s1->omega is in body-local frame, so angular impulse stays in body-local
 		Vector deltaOmegaA = iIT_crossA_local * j;
 		Vector deltaOmegaB = -(iIT_crossB_local * j);
 
