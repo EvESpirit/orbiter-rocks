@@ -1713,6 +1713,7 @@ private:
 	int nforcevec_col; // number of collision vectors
 	Vector col_forcevec[10];
 	Vector col_forcepos[10];
+	double collisionCooldownT; // simulation time until which orbit stabilisation is suppressed after collision
 
 	char *classname;   // vessel class name
 	char *onlinehelp;  // string for online help support (or NULL if none)

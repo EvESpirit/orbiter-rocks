@@ -201,11 +201,11 @@ static LONG WINAPI OrbiterCrashHandler(EXCEPTION_POINTERS *pExceptionInfo)
 	// Log stack registers
 	CONTEXT *ctx = pExceptionInfo->ContextRecord;
 	if (ctx) {
-		sprintf(buf, "*** REGISTERS: EIP=0x%08X ESP=0x%08X EBP=0x%08X EAX=0x%08X",
-		        ctx->Eip, ctx->Esp, ctx->Ebp, ctx->Eax);
+		sprintf(buf, "*** REGISTERS: RIP=0x%016llX RSP=0x%016llX RBP=0x%016llX RAX=0x%016llX",
+		        ctx->Rip, ctx->Rsp, ctx->Rbp, ctx->Rax);
 		oapiWriteLog(buf);
-		sprintf(buf, "*** REGISTERS: EBX=0x%08X ECX=0x%08X EDX=0x%08X ESI=0x%08X EDI=0x%08X",
-		        ctx->Ebx, ctx->Ecx, ctx->Edx, ctx->Esi, ctx->Edi);
+		sprintf(buf, "*** REGISTERS: RBX=0x%016llX RCX=0x%016llX RDX=0x%016llX RSI=0x%016llX RDI=0x%016llX",
+		        ctx->Rbx, ctx->Rcx, ctx->Rdx, ctx->Rsi, ctx->Rdi);
 		oapiWriteLog(buf);
 	}
 	
