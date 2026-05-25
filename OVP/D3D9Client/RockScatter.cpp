@@ -4,6 +4,7 @@ extern class D3D9Client* g_client;
 // RockScatter.cpp
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
 // Dual licensed under GPL v3 and LGPL v3
+// Copyright (c) EvESpirit
 // ==============================================================
 
 #include "RockScatter.h"

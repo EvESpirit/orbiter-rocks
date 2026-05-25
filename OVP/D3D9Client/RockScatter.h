@@ -2,7 +2,8 @@
 // RockScatter.h
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
 // Dual licensed under GPL v3 and LGPL v3
-// ==============================================================
+// Copyright (c) EvESpirit
+// ==========================================================================================
 
 // ==============================================================
 // Procedural surface rock scatter system.

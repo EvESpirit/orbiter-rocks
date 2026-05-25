@@ -1,3 +1,5 @@
+// Copyright (c) EvESpirit
+// Licensed under the MIT License
 // ==============================================================
 // RockScatter.cpp - Core engine rock scatter (data + collision only)
 // ==============================================================

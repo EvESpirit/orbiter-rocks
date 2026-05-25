@@ -1,7 +1,8 @@
+// Copyright (c) EvESpirit
+// Licensed under the MIT License
 // ==============================================================
 // RockScatter.h
 // Part of the ORBITER core engine
-// Dual licensed under GPL v3 and LGPL v3
 // ==============================================================
 //
 // Core rock scatter system - procedurally generates deterministic
