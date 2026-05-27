@@ -1715,6 +1715,17 @@ private:
 	Vector col_forcepos[10];
 	double collisionCooldownT; // simulation time until which orbit stabilisation is suppressed after collision
 
+	// Debug visualization data for vessel-to-vessel collisions
+	struct CollisionDebugVis {
+		bool active;           // true if a collision was detected this frame
+		VECTOR3 contactPt;     // contact point in vessel-local frame
+		VECTOR3 normal;        // collision normal in vessel-local frame (points outward)
+		double depth;          // penetration depth
+		VECTOR3 impulseDir;    // impulse direction in vessel-local frame
+		double impulseMag;     // impulse magnitude
+		VECTOR3 leverArm;      // lever arm from CoM to contact in vessel-local frame
+	} m_colDebug;
+
 	char *classname;   // vessel class name
 	char *onlinehelp;  // string for online help support (or NULL if none)
 
@@ -1728,13 +1739,35 @@ private:
 	UINT nmesh;        // number of meshes
 	DWORD_PTR mesh_crc;    // visual state checksum
 
+	bool bIsConvexCollider; // If true, uses GJK Convex Hull. If false, uses Point-vs-Triangle mesh collision.
+
+public:
 	// Hull vertex cache for rock collision (vessel-local coords)
-	std::vector<VECTOR3> m_hullCache;   // cached hull vertices in vessel-local frame
+	struct HullVertex {
+		VECTOR3 pos;
+		UINT meshIdx;
+		DWORD groupIdx;
+		DWORD clusterIdx;
+	};
+	struct HullGroupSlice {
+		size_t startIdx;
+		size_t count;
+		Vector minP, maxP;
+		bool isDockClearZone;
+	};
+protected:
+	std::vector<HullVertex> m_hullCacheStatic; // original untransformed vertices
+	std::vector<HullGroupSlice> m_hullGroupSlices; // groups of vertices by submesh
+	std::vector<VECTOR3> m_hullCache;   // cached hull vertices in vessel-local frame (animated)
+	std::vector<WORD> m_convexHullIdx;  // quickhull triangle indices (3 per face) for visualization
 	UINT m_hullCacheMeshCount;          // nmesh when cache was last built
 	std::vector<VECTOR3> m_hullCacheP;  // hull points in planet-local frame
 	Vector m_hullMinP, m_hullMaxP;      // AABB of hull points in planet-local frame
 	bool m_hullCachePValid;             // true if m_hullCacheP is valid for current frame
-	void RebuildHullCache();            // (re)build m_hullCache from meshlist
+	bool m_hullVisualValid;             // true if m_convexHullIdx is valid for current animation state
+	void RebuildHullCache();            // (re)build m_hullCacheStatic from meshlist
+	void RebuildConvexHullVisual();     // rebuild m_convexHullIdx from m_hullCache
+	void ApplyAnimationToHullCache();   // animate m_hullCacheStatic to m_hullCache
 	void UpdateHullCacheP();            // update m_hullCacheP from m_hullCache
 	void CheckBaseCollisions(class Planet *pp);
 	void ResolveCollisionWith(Vessel *v);
