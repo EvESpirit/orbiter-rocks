@@ -4526,6 +4526,20 @@ bool Vessel::AddSurfaceForces (Vector *F, Vector *M, const StateVectors *s, doub
 					nforcevec++;
 				}
 
+				if (!m_colDebug.active || -tdy[i] > m_colDebug.depth) {
+					Vector nLocal = tmul(s->R, hn);
+					m_colDebug.active = true;
+					m_colDebug.contactPt = { (float)touchdown_vtx[i].pos.x, (float)touchdown_vtx[i].pos.y, (float)touchdown_vtx[i].pos.z };
+					m_colDebug.normal = { (float)nLocal.x, (float)nLocal.y, (float)nLocal.z };
+					m_colDebug.depth = -tdy[i];
+					Vector force = hn * fn[i] + d1h * flng[i] + d2h * flat[i];
+					Vector impLocal = tmul(s->R, force) * dt;
+					m_colDebug.impulseDir = { (float)impLocal.x, (float)impLocal.y, (float)impLocal.z };
+					m_colDebug.impulseMag = impLocal.length();
+					m_colDebug.leverArm = m_colDebug.contactPt;
+					m_colDebug.showTime = td.SimT1 + 3.0;
+				}
+
 			} else {
 				fn[i] = flng[i] = flat[i] = 0.0;
 			}
@@ -5075,6 +5089,10 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 		M_b2p.Set(base->s1->R);
 		M_b2p.tpremul(pp->s1->R);
 
+		Mesh **m_us, **m_os;
+		DWORD n_us, n_os;
+		base->ExportBaseStructures(&m_us, &n_us, &m_os, &n_os);
+
 		Mesh **m_col;
 		DWORD n_col;
 		base->ExportCollisionMeshes(&m_col, &n_col);
@@ -5101,7 +5119,12 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 			}
 		};
 
-		checkMeshList(m_col, n_col);
+		if (n_col > 0) {
+			checkMeshList(m_col, n_col);
+		} else {
+			checkMeshList(m_us, n_us);
+			checkMeshList(m_os, n_os);
+		}
 
 		if (bestRes.hit) {
 			Vector norm(bestRes.normal.x, bestRes.normal.y, bestRes.normal.z);
@@ -5155,6 +5178,17 @@ void Vessel::CheckBaseCollisions(Planet *pp) {
 					col_forcepos[nforcevec_col] = Vector(bestRes.contactPtLocal.x, bestRes.contactPtLocal.y, bestRes.contactPtLocal.z);
 					nforcevec_col++;
 				}
+
+				m_colDebug.active = true;
+				m_colDebug.contactPt = { bestRes.contactPtLocal.x, bestRes.contactPtLocal.y, bestRes.contactPtLocal.z };
+				Vector nLocal = tmul(s1->R, normGlobal);
+				m_colDebug.normal = { (float)nLocal.x, (float)nLocal.y, (float)nLocal.z };
+				m_colDebug.depth = bestRes.depth;
+				Vector impLocal = tmul(s1->R, (normGlobal * (j_n * mass)) + (delta_v_t * mass));
+				m_colDebug.impulseDir = { (float)impLocal.x, (float)impLocal.y, (float)impLocal.z };
+				m_colDebug.impulseMag = impLocal.length();
+				m_colDebug.leverArm = m_colDebug.contactPt;
+				m_colDebug.showTime = td.SimT1 + 3.0;
 
 				// Angular damping
 				// Because this mesh check evaluates a single deepest penetration point,
@@ -6393,6 +6427,7 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 			m_colDebug.impulseDir = {impLocal.x, impLocal.y, impLocal.z};
 			m_colDebug.impulseMag = j;
 			m_colDebug.leverArm = {rAlocal.x, rAlocal.y, rAlocal.z};
+			m_colDebug.showTime = td.SimT1 + 3.0;
 		}
 		{
 			Vector nLocalB = tmul(v->s1->R, -normGlobal);
@@ -6405,6 +6440,7 @@ void Vessel::ResolveCollisionWith(Vessel *v) {
 			v->m_colDebug.impulseDir = {impLocalB.x, impLocalB.y, impLocalB.z};
 			v->m_colDebug.impulseMag = j;
 			v->m_colDebug.leverArm = {rBlocal.x, rBlocal.y, rBlocal.z};
+			v->m_colDebug.showTime = td.SimT1 + 3.0;
 		}
 
 		double cooldownEnd = td.SimT1 + 1.0;
@@ -6550,7 +6586,8 @@ void Vessel::Update (bool force)
 		UpdateSurfParams();
 
 	nforcevec_col = 0;
-	m_colDebug.active = false;
+	if (td.SimT1 >= m_colDebug.showTime)
+		m_colDebug.active = false;
 
 	if (proxyplanet && fstatus != FLIGHTSTATUS_LANDED && !bFRplayback) {
 
@@ -6559,32 +6596,18 @@ void Vessel::Update (bool force)
 			Planet *pp = (Planet*)proxyplanet;
 			RockScatter *rs = pp->GetRockScatter();
 			if (rs) {
-				// Rebuild hull cache if meshes changed (noop if not)
-				RebuildHullCache();
+				// Update hull cache (includes animations and touchdown points)
+				UpdateHullCacheP();
 
-				if (!m_hullCache.empty()) {
+				if (!m_hullCacheP.empty()) {
 					// Get vessel position in planet-local frame
 					Vector localPosV(s1->pos - proxyplanet->s1->pos);
 					localPosV.Set(tmul(proxyplanet->s1->R, localPosV));
-					VECTOR3 localPos = {localPosV.x, localPosV.y, localPosV.z};
-
-					// Build vessel-to-planet-local transform: R_planet^-1 * R_vessel
-					Matrix V2P;
-					V2P.Set(s1->R);
-					V2P.tpremul(proxyplanet->s1->R);
-
-					// Transform cached vessel-local hull points to planet-local
-					std::vector<VECTOR3> hullPtsWorld(m_hullCache.size());
-					for (size_t h = 0; h < m_hullCache.size(); h++) {
-						Vector vp(m_hullCache[h].x, m_hullCache[h].y, m_hullCache[h].z);
-						Vector plv = mul(V2P, vp);
-						hullPtsWorld[h] = {plv.x + localPosV.x, plv.y + localPosV.y,
-										   plv.z + localPosV.z};
-					}
+					VECTOR3 localPos = { (float)localPosV.x, (float)localPosV.y, (float)localPosV.z };
 
 					auto hitRes = rs->CheckCollision(
-						hullPtsWorld.data(),
-						(int)hullPtsWorld.size(), localPos, size, 100.0f);
+						m_hullCacheP.data(),
+						(int)m_hullCacheP.size(), localPos, size, 100.0f);
 
 					if (hitRes.hit) {
 						// Collision normal: rock center -> vessel CoM direction, to global
@@ -6619,8 +6642,26 @@ void Vessel::Update (bool force)
 								Vector F_global = deltaVel * (mass / td.SimDT);
 								col_forcevec[nforcevec_col] = tmul(s1->R, F_global);
 								Vector p_planet_local(hitRes.contactPtLocal.x, hitRes.contactPtLocal.y, hitRes.contactPtLocal.z);
-								col_forcepos[nforcevec_col] = tmul(V2P, p_planet_local - localPosV);
+								
+								// Build vessel-to-planet-local transform: R_planet^-1 * R_vessel
+								Matrix V2P;
+								V2P.Set(s1->R);
+								V2P.tpremul(proxyplanet->s1->R);
+								
+								Vector cPtLocal = tmul(V2P, p_planet_local - localPosV);
+								col_forcepos[nforcevec_col] = cPtLocal;
 								nforcevec_col++;
+								
+								m_colDebug.active = true;
+								m_colDebug.contactPt = { (float)cPtLocal.x, (float)cPtLocal.y, (float)cPtLocal.z };
+								Vector nLocal = tmul(s1->R, normGlobal);
+								m_colDebug.normal = { (float)nLocal.x, (float)nLocal.y, (float)nLocal.z };
+								m_colDebug.depth = hitRes.depth;
+								Vector impLocal = tmul(s1->R, deltaVel * mass);
+								m_colDebug.impulseDir = { (float)impLocal.x, (float)impLocal.y, (float)impLocal.z };
+								m_colDebug.impulseMag = impLocal.length();
+								m_colDebug.leverArm = m_colDebug.contactPt;
+								m_colDebug.showTime = td.SimT1 + 3.0;
 							}
 						}
 
@@ -9952,7 +9993,7 @@ void VESSEL::AddForce (const VECTOR3 &F, const VECTOR3 &r) const
 
 bool VESSEL::GetCollisionDebugData (VECTOR3 &contactPt, VECTOR3 &normal, VECTOR3 &impulseDir, VECTOR3 &leverArm, double &depth, double &impulseMag) const
 {
-	if (!vessel->m_colDebug.active) return false;
+	if (td.SimT1 >= vessel->m_colDebug.showTime && !vessel->m_colDebug.active) return false;
 
 	contactPt = vessel->m_colDebug.contactPt;
 	normal = vessel->m_colDebug.normal;
@@ -9986,6 +10027,28 @@ const WORD *VESSEL::GetCollisionHullIndices (DWORD &nIdx) const
 	}
 	nIdx = (DWORD)vessel->m_convexHullIdx.size();
 	return &(vessel->m_convexHullIdx[0]);
+}
+
+const VECTOR3 *VESSEL::GetCollisionClearZones (DWORD &nBoxes) const
+{
+	vessel->RebuildHullCache();
+	vessel->ApplyAnimationToHullCache();
+	
+	vessel->m_clearZoneCache.clear();
+	for (const auto& slice : vessel->m_hullGroupSlices) {
+		if (slice.isDockClearZone) {
+			vessel->m_clearZoneCache.push_back({slice.minP.x, slice.minP.y, slice.minP.z});
+			vessel->m_clearZoneCache.push_back({slice.maxP.x, slice.maxP.y, slice.maxP.z});
+		}
+	}
+	
+	if (vessel->m_clearZoneCache.empty()) {
+		nBoxes = 0;
+		return NULL;
+	}
+	
+	nBoxes = (DWORD)(vessel->m_clearZoneCache.size() / 2);
+	return &(vessel->m_clearZoneCache[0]);
 }
 
 bool VESSEL::IsConvexCollider () const

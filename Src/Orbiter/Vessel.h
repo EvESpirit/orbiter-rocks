@@ -1724,7 +1724,8 @@ private:
 		VECTOR3 impulseDir;    // impulse direction in vessel-local frame
 		double impulseMag;     // impulse magnitude
 		VECTOR3 leverArm;      // lever arm from CoM to contact in vessel-local frame
-	} m_colDebug;
+		double showTime;       // simulation time until which this debug data should be rendered
+	} mutable m_colDebug;
 
 	char *classname;   // vessel class name
 	char *onlinehelp;  // string for online help support (or NULL if none)
@@ -1760,6 +1761,7 @@ protected:
 	std::vector<HullGroupSlice> m_hullGroupSlices; // groups of vertices by submesh
 	std::vector<VECTOR3> m_hullCache;   // cached hull vertices in vessel-local frame (animated)
 	std::vector<WORD> m_convexHullIdx;  // quickhull triangle indices (3 per face) for visualization
+	mutable std::vector<VECTOR3> m_clearZoneCache; // cache for clear zone bounding boxes (min/max pairs)
 	UINT m_hullCacheMeshCount;          // nmesh when cache was last built
 	std::vector<VECTOR3> m_hullCacheP;  // hull points in planet-local frame
 	Vector m_hullMinP, m_hullMaxP;      // AABB of hull points in planet-local frame

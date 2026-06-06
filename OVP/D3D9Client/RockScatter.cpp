@@ -768,12 +768,13 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
           float bottomOfs = 0.0f;
           if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
             bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
-          D3DXVECTOR3 rockGeo =
-              rock.localPos *
-              (float)(planetRad + rock.elevation + bottomOfs * rock.scale);
+            
+          double rockAlt = planetRad + (double)rock.elevation + (double)bottomOfs * rock.scale;
+          VECTOR3 rGeo = _V(rock.localPos.x * rockAlt, rock.localPos.y * rockAlt, rock.localPos.z * rockAlt);
 
           // Distance from vessel (not camera) for culling
-          D3DXVECTOR3 diff = rockGeo - vesselLocalDX;
+          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
+          D3DXVECTOR3 diff = rockGeoFloat - vesselLocalDX;
           float dist2 = D3DXVec3LengthSq(&diff);
 
           // LOD sub-cull by size class
@@ -784,7 +785,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
 
           // skip rocks behind camera
           D3DXVECTOR3 rockCamLocal =
-              rockGeo - D3DXVECTOR3((float)camLocalV.x, (float)camLocalV.y,
+              rockGeoFloat - D3DXVECTOR3((float)camLocalV.x, (float)camLocalV.y,
                                     (float)camLocalV.z);
           float dotFwd = D3DXVec3Dot(&rockCamLocal, &camFwd);
           // Skip rocks more than 10m behind the camera (generous margin)
@@ -824,7 +825,6 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
           VECTOR3 wFwd = mul(grot, _V(ff.x, ff.y, ff.z));
 
           // Camera-relative position, double precision
-          VECTOR3 rGeo = _V(rockGeo.x, rockGeo.y, rockGeo.z);
           VECTOR3 rGeoRot = mul(grot, rGeo);
           VECTOR3 rockCam = rGeoRot - camRel;
 
@@ -854,11 +854,8 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
     batch.mesh->RenderBatchEnd();
 
     if (!debugMatrices.empty()) {
-      D9BBox *bbox = batch.mesh->GetAABB();
       for (auto &m : debugMatrices) {
-        D3DXMATRIX id;
-        D3D9Effect::RenderBoundingBox(&m, D3DXMatrixIdentity(&id), &bbox->min,
-                                      &bbox->max, ptr(D3DXVECTOR4(0, 1, 1, 0.75f)));
+        batch.mesh->RenderWireframe(&m, D3DCOLOR_RGBA(50, 255, 50, 100));
       }
     }
   }
@@ -995,12 +992,12 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
           if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
             bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
 
-          float rElev =
-              (float)(planetRad + rock.elevation + bottomOfs * rock.scale);
-          D3DXVECTOR3 rockGeo = rock.localPos * rElev;
+          double rockAlt = planetRad + (double)rock.elevation + (double)bottomOfs * rock.scale;
+          VECTOR3 rGeo = _V(rock.localPos.x * rockAlt, rock.localPos.y * rockAlt, rock.localPos.z * rockAlt);
 
           // Distance cull (hoisted vesselLocalDX)
-          D3DXVECTOR3 diff = rockGeo - vesselLocalDX;
+          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
+          D3DXVECTOR3 diff = rockGeoFloat - vesselLocalDX;
           if (D3DXVec3LengthSq(&diff) > drawDist2 * GetLodCull(rock.sizeClass) *
                                             GetLodCull(rock.sizeClass))
             continue;
@@ -1014,7 +1011,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
 
           // sub-pixel and max distance culling for shadows
           D3DXVECTOR3 rockCamLocal =
-              rockGeo - D3DXVECTOR3((float)camLocalV.x, (float)camLocalV.y,
+              rockGeoFloat - D3DXVECTOR3((float)camLocalV.x, (float)camLocalV.y,
                                     (float)camLocalV.z);
           float cdist = D3DXVec3Length(&rockCamLocal);
           if (cdist > activeDrawDist * 2.5f)
@@ -1041,7 +1038,6 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
           VECTOR3 wUp = mul(grot, _V(up.x, up.y, up.z));
           VECTOR3 wFwd = mul(grot, _V(ff.x, ff.y, ff.z));
 
-          VECTOR3 rGeo = _V(rockGeo.x, rockGeo.y, rockGeo.z);
           VECTOR3 rGeoRot = mul(grot, rGeo);
           VECTOR3 rockCam = rGeoRot - camRel;
 

@@ -2168,6 +2168,13 @@ public:
 	 * \brief Returns true if the vessel uses the implicit GJK Convex Hull for collisions.
 	 */
 	bool IsConvexCollider () const;
+
+	/**
+	 * \brief Returns a list of AABB (min/max pairs) for chunks marked as docking clear zones.
+	 * \param nBoxes [out] Number of bounding boxes
+	 * \return Pointer to an array of VECTOR3 pairs (min, max, min, max, ...), or NULL if none
+	 */
+	const VECTOR3 *GetCollisionClearZones (DWORD &nBoxes) const;
 	//@}
 
 

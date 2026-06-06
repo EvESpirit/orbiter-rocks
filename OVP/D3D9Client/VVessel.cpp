@@ -880,19 +880,34 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 					}
 				}
 
+				// Draw clear zones
+				DWORD nBoxes = 0;
+				const VECTOR3* clearZones = vessel->GetCollisionClearZones(nBoxes);
+				if (clearZones && nBoxes > 0) {
+					D3DXMATRIX id;
+					D3DXMatrixIdentity(&id);
+					for (DWORD i = 0; i < nBoxes; i++) {
+						D3DXVECTOR4 bmin((float)clearZones[i*2].x, (float)clearZones[i*2].y, (float)clearZones[i*2].z, 1.0f);
+						D3DXVECTOR4 bmax((float)clearZones[i*2+1].x, (float)clearZones[i*2+1].y, (float)clearZones[i*2+1].z, 1.0f);
+						D3D9Effect::RenderBoundingBox(&mWorld, &id, &bmin, &bmax, ptr(D3DXVECTOR4(0, 1, 1, 0.75f))); // Cyan box
+					}
+				}
+
 				VECTOR3 cPt, cNorm, cImp, cArm;
 				double cDepth, cImpMag;
 				if (vessel->GetCollisionDebugData(cPt, cNorm, cImp, cArm, cDepth, cImpMag)) {
-					// Draw contact point as small sphere
-					D3DXVECTOR4 p1((float)cPt.x, (float)cPt.y, (float)cPt.z, 0.5f);
-					D3D9Effect::RenderBoundingSphere(&mWorld, &id, &p1, ptr(D3DXVECTOR4(1, 1, 0, 1)));
+					// Draw contact point as small cube
+					D3DXMATRIX ptW;
+					D3DXMatrixTranslation(&ptW, (float)cPt.x, (float)cPt.y, (float)cPt.z);
+					D3DXMatrixMultiply(&ptW, &ptW, &mWorld);
+					D3D9Effect::RenderSolidCube(&ptW, 0.5f, ptr(D3DXCOLOR(1, 0, 0, 1)));
 					
 					// Draw collision normal as an arrow (Red)
 					if (length(cNorm) > 1e-6) {
 						VECTOR3 nNorm = unit(cNorm);
 						VECTOR3 rNorm = _V(0,1,0); if (fabs(nNorm.y) > 0.99) rNorm = _V(1,0,0);
 						rNorm = unit(crossp(nNorm, rNorm));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nNorm, &rNorm, 2.0f, ptr(D3DXCOLOR(1, 0, 0, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nNorm, &rNorm, 0.5f, ptr(D3DXCOLOR(1, 0, 0, 1)));
 					}
 					
 					// Draw impulse direction as an arrow (Blue)
@@ -900,7 +915,7 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 						VECTOR3 nImp = unit(cImp);
 						VECTOR3 rImp = _V(0,1,0); if (fabs(nImp.y) > 0.99) rImp = _V(1,0,0);
 						rImp = unit(crossp(nImp, rImp));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nImp, &rImp, 2.0f, ptr(D3DXCOLOR(0, 0, 1, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nImp, &rImp, 0.5f, ptr(D3DXCOLOR(0, 0, 1, 1)));
 					}
 					
 					// Draw lever arm from CoM as an arrow (Green)
@@ -909,7 +924,7 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 						VECTOR3 nArm = unit(cArm);
 						VECTOR3 rArm = _V(0,1,0); if (fabs(nArm.y) > 0.99) rArm = _V(1,0,0);
 						rArm = unit(crossp(nArm, rArm));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &zro, &nArm, &rArm, (float)length(cArm), ptr(D3DXCOLOR(0, 1, 0, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &zro, &nArm, &rArm, min(0.5f, (float)length(cArm)), ptr(D3DXCOLOR(0, 1, 0, 1)));
 					}
 				}
 			}
@@ -983,19 +998,34 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 					}
 				}
 
+				// Draw clear zones
+				DWORD nBoxes = 0;
+				const VECTOR3* clearZones = vessel->GetCollisionClearZones(nBoxes);
+				if (clearZones && nBoxes > 0) {
+					D3DXMATRIX id;
+					D3DXMatrixIdentity(&id);
+					for (DWORD i = 0; i < nBoxes; i++) {
+						D3DXVECTOR4 bmin((float)clearZones[i*2].x, (float)clearZones[i*2].y, (float)clearZones[i*2].z, 1.0f);
+						D3DXVECTOR4 bmax((float)clearZones[i*2+1].x, (float)clearZones[i*2+1].y, (float)clearZones[i*2+1].z, 1.0f);
+						D3D9Effect::RenderBoundingBox(&mWorld, &id, &bmin, &bmax, ptr(D3DXVECTOR4(0, 1, 1, 0.75f))); // Cyan box
+					}
+				}
+
 				VECTOR3 cPt, cNorm, cImp, cArm;
 				double cDepth, cImpMag;
 				if (vessel->GetCollisionDebugData(cPt, cNorm, cImp, cArm, cDepth, cImpMag)) {
-					// Draw contact point as small sphere
-					D3DXVECTOR4 p1((float)cPt.x, (float)cPt.y, (float)cPt.z, 0.5f);
-					D3D9Effect::RenderBoundingSphere(&mWorld, &id, &p1, ptr(D3DXVECTOR4(1, 1, 0, 1)));
+					// Draw contact point as small cube
+					D3DXMATRIX ptW;
+					D3DXMatrixTranslation(&ptW, (float)cPt.x, (float)cPt.y, (float)cPt.z);
+					D3DXMatrixMultiply(&ptW, &ptW, &mWorld);
+					D3D9Effect::RenderSolidCube(&ptW, 0.5f, ptr(D3DXCOLOR(1, 0, 0, 1)));
 					
 					// Draw collision normal as an arrow (Red)
 					if (length(cNorm) > 1e-6) {
 						VECTOR3 nNorm = unit(cNorm);
 						VECTOR3 rNorm = _V(0,1,0); if (fabs(nNorm.y) > 0.99) rNorm = _V(1,0,0);
 						rNorm = unit(crossp(nNorm, rNorm));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nNorm, &rNorm, 2.0f, ptr(D3DXCOLOR(1, 0, 0, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nNorm, &rNorm, 0.5f, ptr(D3DXCOLOR(1, 0, 0, 1)));
 					}
 					
 					// Draw impulse direction as an arrow (Blue)
@@ -1003,7 +1033,7 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 						VECTOR3 nImp = unit(cImp);
 						VECTOR3 rImp = _V(0,1,0); if (fabs(nImp.y) > 0.99) rImp = _V(1,0,0);
 						rImp = unit(crossp(nImp, rImp));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nImp, &rImp, 2.0f, ptr(D3DXCOLOR(0, 0, 1, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &cPt, &nImp, &rImp, 0.5f, ptr(D3DXCOLOR(0, 0, 1, 1)));
 					}
 					
 					// Draw lever arm from CoM as an arrow (Green)
@@ -1012,7 +1042,7 @@ bool vVessel::Render(LPDIRECT3DDEVICE9 dev, bool internalpass)
 						VECTOR3 nArm = unit(cArm);
 						VECTOR3 rArm = _V(0,1,0); if (fabs(nArm.y) > 0.99) rArm = _V(1,0,0);
 						rArm = unit(crossp(nArm, rArm));
-						D3D9Effect::RenderArrow(vessel->GetHandle(), &zro, &nArm, &rArm, (float)length(cArm), ptr(D3DXCOLOR(0, 1, 0, 1)));
+						D3D9Effect::RenderArrow(vessel->GetHandle(), &zro, &nArm, &rArm, min(0.5f, (float)length(cArm)), ptr(D3DXCOLOR(0, 1, 0, 1)));
 					}
 				}
 			}
