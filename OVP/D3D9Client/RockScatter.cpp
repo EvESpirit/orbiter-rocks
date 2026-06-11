@@ -17,8 +17,7 @@ extern class D3D9Client* g_client;
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <fstream>
-#include <sstream>
+
 #include <string>
 
 namespace oapi { class D3D9Client; }
@@ -41,20 +40,6 @@ static inline float GetLodCull(int sizeClass) {
 }
 
 // PRNG helpers
-
-uint32_t RockScatter::HashTile(uint32_t seed, int lvl, int ilat, int ilng) {
-  uint32_t h = seed;
-  h ^= (uint32_t)lvl * 2654435761u;
-  h ^= (uint32_t)ilat * 2246822519u;
-  h ^= (uint32_t)ilng * 3266489917u;
-  h ^= h >> 16;
-  h *= 0x85ebca6bu;
-  h ^= h >> 13;
-  h *= 0xc2b2ae35u;
-  h ^= h >> 16;
-  return h ? h : 1u;
-}
-
 uint32_t RockScatter::XorShift32(uint32_t &state) {
   state ^= state << 13;
   state ^= state >> 17;
@@ -66,9 +51,7 @@ float RockScatter::RandFloat(uint32_t &state) {
   return float(XorShift32(state) & 0x00FFFFFFu) / float(0x01000000u);
 }
 
-float RockScatter::RandRange(uint32_t &state, float lo, float hi) {
-  return lo + RandFloat(state) * (hi - lo);
-}
+
 
 // Basic meshgen using vertex displacement (icosphere)
 
@@ -395,13 +378,11 @@ RockScatter::RockScatter(vPlanet *planet, LPDIRECT3DDEVICE9 pDev)
   m_seed = h ? h : 1u;
 
   CreateRockMeshes();
-  LoadBaseClearZones();
   LogAlw("RockScatter: Initialised for '%s' (seed=%u, drawDist=%.0f m, "
-         "density=%.4f, clearZones=%u)",
+         "density=%.4f)",
          name ? name : "?", m_seed,
          pCfgInit ? pCfgInit->fDrawDist : 0.0f,
-         pCfgInit ? pCfgInit->fDensity : 0.0f,
-         (unsigned)m_clearZones.size());
+         pCfgInit ? pCfgInit->fDensity : 0.0f);
 }
 
 RockScatter::~RockScatter() {
@@ -420,128 +401,6 @@ RockScatter::~RockScatter() {
   }
 }
 
-// Load clear zones from base config files
-
-void RockScatter::LoadBaseClearZones() {
-  m_clearZones.clear();
-
-  OBJHANDLE hPlanet = m_planet->Object();
-  if (!hPlanet)
-    return;
-
-  DWORD nBases = oapiGetBaseCount(hPlanet);
-  if (nBases == 0)
-    return;
-
-  double planetRad = m_planet->GetSize();
-
-  for (DWORD b = 0; b < nBases; b++) {
-    OBJHANDLE hBase = oapiGetBaseByIndex(hPlanet, b);
-    if (!hBase)
-      continue;
-
-    // Get base position in radians
-    double baseLng = 0.0, baseLat = 0.0;
-    oapiGetBaseEquPos(hBase, &baseLng, &baseLat);
-
-    // Open base config file
-    const char *cfgFile = oapiGetObjectFileName(hBase);
-    if (!cfgFile || !cfgFile[0])
-      continue;
-
-    std::ifstream fs(cfgFile);
-    if (fs.fail())
-      continue;
-
-    int zonesFound = 0;
-    std::string line;
-
-    while (std::getline(fs, line) && zonesFound < MAX_CLEAR_AREAS_PER_BASE) {
-      // Look for AREA_TO_CLEAR_N = X, Y
-      size_t pos = line.find("AREA_TO_CLEAR_");
-      if (pos == std::string::npos)
-        continue;
-
-      // Find the '=' sign
-      size_t eq = line.find('=', pos);
-      if (eq == std::string::npos)
-        continue;
-
-      // Parse the two values after '='
-      std::string values = line.substr(eq + 1);
-      // Replace commas with spaces for easier parsing
-      for (char &c : values) {
-        if (c == ',')
-          c = ' ';
-      }
-
-      float x = 0.0f, y = 0.0f;
-      std::istringstream iss(values);
-      if (!(iss >> x >> y))
-        continue;
-
-      // Both extents must be positive and non-zero
-      if (x <= 0.0f || y <= 0.0f)
-        continue;
-
-      ClearZone cz;
-      cz.baseLng = baseLng;
-      cz.baseLat = baseLat;
-      cz.halfExtX = x;
-      cz.halfExtY = y;
-      m_clearZones.push_back(cz);
-      zonesFound++;
-
-      char baseName[64];
-      oapiGetObjectName(hBase, baseName, 64);
-      LogAlw("RockScatter: Base '%s' clear zone #%d: halfExtX=%.1f m, "
-             "halfExtY=%.1f m",
-             baseName, zonesFound, x, y);
-    }
-  }
-
-  if (!m_clearZones.empty()) {
-    LogAlw("RockScatter: Loaded %u total clear zones from %u bases on '%s'",
-           (unsigned)m_clearZones.size(), nBases, m_planet->GetName());
-  }
-}
-
-// Check if a surface position falls inside any base clear zone
-
-bool RockScatter::IsInClearZone(double lng, double lat) const {
-  if (m_clearZones.empty())
-    return false;
-
-  double planetRad = m_planet->GetSize();
-
-  for (const auto &cz : m_clearZones) {
-    // Quick angular rejection before expensive trig
-    // Max extent in radians (generous upper bound)
-    double maxArc = (double)max(cz.halfExtX, cz.halfExtY) / planetRad * 1.5;
-
-    double dLat = lat - cz.baseLat;
-    if (fabs(dLat) > maxArc)
-      continue;
-
-    double dLng = lng - cz.baseLng;
-    while (dLng > PI)
-      dLng -= 2.0 * PI;
-    while (dLng < -PI)
-      dLng += 2.0 * PI;
-    if (fabs(dLng) > maxArc)
-      continue;
-
-    // Convert angular deltas to surface metres
-    double dx = dLng * cos(lat) * planetRad; // east-west (metres)
-    double dy = dLat * planetRad;            // north-south (metres)
-
-    // Rectangle test: [-halfExtX, -halfExtY] to [+halfExtX, +halfExtY]
-    if (fabs(dx) <= (double)cz.halfExtX && fabs(dy) <= (double)cz.halfExtY) {
-      return true;
-    }
-  }
-  return false;
-}
 
 // Fetch rock instances from the core engine via OrbiterAPI.
 // The core owns the authoritative rock generation; we just convert to D3D9 format.

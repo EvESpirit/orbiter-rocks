@@ -23,8 +23,6 @@
 #include <unordered_map>
 #include <vector>
 
-// Maximum number of AREA_TO_CLEAR entries per base
-#define MAX_CLEAR_AREAS_PER_BASE 32
 
 class vPlanet;
 
@@ -75,23 +73,12 @@ private:
     }
   };
 
-  // Rectangular exclusion zone around a surface base
-  struct ClearZone {
-    double baseLng; // Base longitude (radians)
-    double baseLat; // Base latitude (radians)
-    float halfExtX; // Half-extent in east-west direction (metres)
-    float halfExtY; // Half-extent in north-south direction (metres)
-  };
 
   // Generate (or look up cached) rocks for one tile
   const std::vector<RockInstance> &GetRocksForTile(int lvl, int ilat,
                                                    int ilng) const;
 
-  // Load AREA_TO_CLEAR definitions from all base config files on this planet
-  void LoadBaseClearZones();
 
-  // Check whether a given position (radians) falls inside any clear zone
-  bool IsInClearZone(double lng, double lat) const;
 
   // Build procedural icosphere-based rock meshes
   void CreateRockMeshes();
@@ -100,10 +87,10 @@ private:
                            std::vector<WORD> &outIdxs);
 
   // Deterministic hash / helpers
-  static uint32_t HashTile(uint32_t seed, int lvl, int ilat, int ilng);
+
   static uint32_t XorShift32(uint32_t &state);
   static float RandFloat(uint32_t &state); // [0, 1)
-  static float RandRange(uint32_t &state, float lo, float hi);
+
 
   // Owner planet
   vPlanet *m_planet;
@@ -123,8 +110,7 @@ private:
 
   float m_lastDensityMult;
 
-  // Base clear zones loaded from all surface base configs on this planet
-  std::vector<ClearZone> m_clearZones;
+
 
 
 };
