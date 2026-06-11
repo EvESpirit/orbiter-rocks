@@ -1,13 +1,13 @@
 #include "D3D9Client.h"
 extern class D3D9Client* g_client;
 // ==============================================================
-// RockScatter.cpp
+// Scatterer.cpp
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
 // Dual licensed under GPL v3 and LGPL v3
 // Copyright (c) EvESpirit
 // ==============================================================
 
-#include "RockScatter.h"
+#include "Scatterer.h"
 #include "D3D9Config.h"
 #include "Log.h"
 #include "OapiExtension.h"
@@ -29,25 +29,25 @@ static const float g_qualityMult[] = {0.0f, 0.25f, 0.6f, 1.0f};
 static inline float GetLodCull(int sizeClass) {
   switch (sizeClass) {
   case 0:
-    return Config->fRockDistSmall;
+    return Config->fScatterDistSmall;
   case 1:
-    return Config->fRockDistMedium;
+    return Config->fScatterDistMedium;
   case 2:
-    return Config->fRockDistLarge;
+    return Config->fScatterDistLarge;
   default:
     return 1.0f;
   }
 }
 
 // PRNG helpers
-uint32_t RockScatter::XorShift32(uint32_t &state) {
+uint32_t Scatterer::XorShift32(uint32_t &state) {
   state ^= state << 13;
   state ^= state >> 17;
   state ^= state << 5;
   return state;
 }
 
-float RockScatter::RandFloat(uint32_t &state) {
+float Scatterer::RandFloat(uint32_t &state) {
   return float(XorShift32(state) & 0x00FFFFFFu) / float(0x01000000u);
 }
 
@@ -101,7 +101,7 @@ static void SubdivideIco(std::vector<NTVERTEX> &verts, std::vector<WORD> &idxs,
   SubdivideIco(verts, idxs, midCache, m01, m12, m02, depth - 1);
 }
 
-void RockScatter::CreateIcosphereMesh(int subdivisions, UINT seed,
+void Scatterer::CreateIcosphereMesh(int subdivisions, UINT seed,
                                       float baseScale,
                                       std::vector<NTVERTEX> &outVerts,
                                       std::vector<WORD> &outIdxs) {
@@ -185,10 +185,10 @@ void RockScatter::CreateIcosphereMesh(int subdivisions, UINT seed,
   }
 }
 
-void RockScatter::CreateRockMeshes() {
-  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+void Scatterer::CreateScatterMeshes() {
+  const ::ScattererCfg *pCfg = oapiGetScattererCfg(m_planet->Object());
   if (!pCfg) return;
-  const ::RockScatterCfg &cfg = *pCfg;
+  const ::ScattererCfg &cfg = *pCfg;
 
   if (cfg.sMeshPrefix[0] != '\0') {
     WIN32_FIND_DATAA fd;
@@ -204,8 +204,8 @@ void RockScatter::CreateRockMeshes() {
 
     sprintf_s(searchPath, sizeof(searchPath), "%sMeshes\\%s*.msh", exePath,
               cfg.sMeshPrefix);
-    LogAlw("RockScatter: Mesh prefix = '%s'", cfg.sMeshPrefix);
-    LogAlw("RockScatter: Searching for meshes with pattern '%s'", searchPath);
+    LogAlw("Scatterer: Mesh prefix = '%s'", cfg.sMeshPrefix);
+    LogAlw("Scatterer: Searching for meshes with pattern '%s'", searchPath);
 
     std::vector<std::string> foundFiles;
     HANDLE hFind = FindFirstFileA(searchPath, &fd);
@@ -294,7 +294,7 @@ void RockScatter::CreateRockMeshes() {
               m_meshBottomExtent[2].push_back(bottomExtent);
             }
           }
-          LogAlw("RockScatter: Mesh '%s' bottomExtent=%.2f", fname.c_str(),
+          LogAlw("Scatterer: Mesh '%s' bottomExtent=%.2f", fname.c_str(),
                  bottomExtent);
         }
       }
@@ -317,10 +317,10 @@ void RockScatter::CreateRockMeshes() {
           }
         }
       }
-      LogAlw("RockScatter: Loaded %u custom meshes with prefix '%s'",
+      LogAlw("Scatterer: Loaded %u custom meshes with prefix '%s'",
              foundFiles.size(), cfg.sMeshPrefix);
       LogAlw(
-          "RockScatter: m_meshPool sizes -> Small: %u, Medium: %u, Large: %u",
+          "Scatterer: m_meshPool sizes -> Small: %u, Medium: %u, Large: %u",
           m_meshPool[0].size(), m_meshPool[1].size(), m_meshPool[2].size());
       return; // Skip procedural generation
     }
@@ -365,27 +365,27 @@ void RockScatter::CreateRockMeshes() {
   }
 }
 
-RockScatter::RockScatter(vPlanet *planet, LPDIRECT3DDEVICE9 pDev)
+Scatterer::Scatterer(vPlanet *planet, LPDIRECT3DDEVICE9 pDev)
     : m_planet(planet), m_pDev(pDev), m_seed(0),
-      m_lastDensityMult(*(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT)) {
+      m_lastDensityMult(*(float*)g_client->GetConfigParam(CFGPRM_SCATTERDENSITYMULT)) {
   const char *name = planet->GetName();
   uint32_t h = 5381u;
   if (name)
     for (const char *p = name; *p; p++)
       h = h * 33u + (uint32_t)*p;
-  const ::RockScatterCfg *pCfgInit = oapiGetRockScatterCfg(planet->Object());
+  const ::ScattererCfg *pCfgInit = oapiGetScattererCfg(planet->Object());
   h ^= pCfgInit ? pCfgInit->uSeed : 0u;
   m_seed = h ? h : 1u;
 
-  CreateRockMeshes();
-  LogAlw("RockScatter: Initialised for '%s' (seed=%u, drawDist=%.0f m, "
+  CreateScatterMeshes();
+  LogAlw("Scatterer: Initialised for '%s' (seed=%u, drawDist=%.0f m, "
          "density=%.4f)",
          name ? name : "?", m_seed,
          pCfgInit ? pCfgInit->fDrawDist : 0.0f,
          pCfgInit ? pCfgInit->fDensity : 0.0f);
 }
 
-RockScatter::~RockScatter() {
+Scatterer::~Scatterer() {
   std::vector<D3D9Mesh *> deleted;
   for (int i = 0; i < 3; i++) {
     for (auto mesh : m_meshPool[i]) {
@@ -405,8 +405,8 @@ RockScatter::~RockScatter() {
 // Fetch rock instances from the core engine via OrbiterAPI.
 // The core owns the authoritative rock generation; we just convert to D3D9 format.
 
-const std::vector<RockScatter::RockInstance> &
-RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
+const std::vector<Scatterer::ScatterInstance> &
+Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
   TileKey key = {lvl, ilat, ilng};
   std::lock_guard<std::mutex> lock(m_cacheMutex);
   auto it = m_cache.find(key);
@@ -416,18 +416,18 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   auto &rocks = m_cache[key];
 
   // Query the core engine for this tile's rock data
-  int nRocks = 0;
-  const ::RockInstance *coreRocks =
-      oapiGetRockScatterTiles(m_planet->Object(), lvl, ilat, ilng, &nRocks);
+  int nScatter = 0;
+  const ::ScatterInstance *coreScatter =
+      oapiGetScatterTiles(m_planet->Object(), lvl, ilat, ilng, &nScatter);
 
-  if (!coreRocks || nRocks <= 0)
+  if (!coreScatter || nScatter <= 0)
     return rocks;
 
-  rocks.reserve(nRocks);
+  rocks.reserve(nScatter);
 
-  for (int i = 0; i < nRocks; i++) {
-    const auto &src = coreRocks[i];
-    RockInstance rock;
+  for (int i = 0; i < nScatter; i++) {
+    const auto &src = coreScatter[i];
+    ScatterInstance rock;
     rock.localPos =
         D3DXVECTOR3((float)src.localPos.x, (float)src.localPos.y,
                     (float)src.localPos.z);
@@ -453,22 +453,22 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
 
 // Frame
 
-void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
-  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) == 0)
+void Scatterer::Render(LPDIRECT3DDEVICE9 pDev) {
+  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACESCATTER) == 0)
     return;
   if (m_meshPool[0].empty() && m_meshPool[1].empty() && m_meshPool[2].empty())
     return;
 
   // Invalidate cache dynamically if density multiplier changed
-  if (m_lastDensityMult != *(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT)) {
+  if (m_lastDensityMult != *(float*)g_client->GetConfigParam(CFGPRM_SCATTERDENSITYMULT)) {
     std::lock_guard<std::mutex> lock(m_cacheMutex);
     m_cache.clear();
-    m_lastDensityMult = *(float*)g_client->GetConfigParam(CFGPRM_ROCKDENSITYMULT);
+    m_lastDensityMult = *(float*)g_client->GetConfigParam(CFGPRM_SCATTERDENSITYMULT);
   }
 
-  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+  const ::ScattererCfg *pCfg = oapiGetScattererCfg(m_planet->Object());
   if (!pCfg) return;
-  const ::RockScatterCfg &cfg = *pCfg;
+  const ::ScattererCfg &cfg = *pCfg;
   const Scene *scn = m_planet->GetScene();
   if (!scn)
     return;
@@ -477,7 +477,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
   if (scn->GetCameraProxyVisual() != m_planet)
     return;
 
-  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST);
+  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_SCATTERMAXDIST);
   float fov = (float)scn->GetCameraAperture();
 
   // Camera and vessel positions
@@ -533,7 +533,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
   int vesselIlat = (int)((PI * 0.5 - vesselLat) / tileSize);
   int vesselIlng = (int)((vesselLng + PI) / tileSize);
   int nLngBands = 1 << (lvl + 1);
-  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST) / cfg.fDrawDist * 0.5)));
+  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_SCATTERMAXDIST) / cfg.fDrawDist * 0.5)));
 
   D3D9Sun sunParams = m_planet->GetObjectAtmoParams(camRel);
   float drawDist2 = activeDrawDist * activeDrawDist;
@@ -593,7 +593,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
     }
   }
 
-  int renderedRocks = 0;
+  int renderedScatter = 0;
 
   for (const auto &batch : batches) {
     if (!batch.mesh)
@@ -603,7 +603,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
     batch.mesh->RenderBatchBegin(&sunParams);
 
     std::vector<D3DXMATRIX> debugMatrices;
-    bool showColliders = (Config->bShowRockColliders == 1) || (DebugControls::IsActive() && (*(DWORD*)g_client->GetConfigParam(CFGPRM_GETDEBUGFLAGS) & 0x0004));
+    bool showColliders = (Config->bShowScatterColliders == 1) || (DebugControls::IsActive() && (*(DWORD*)g_client->GetConfigParam(CFGPRM_GETDEBUGFLAGS) & 0x0004));
 
     for (int dlat = -searchR; dlat <= searchR; dlat++) {
       int tilat = vesselIlat + dlat;
@@ -615,7 +615,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
         if (tilng < 0)
           tilng += nLngBands;
 
-        const auto &rocks = GetRocksForTile(lvl, tilat, tilng);
+        const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
 
         for (const auto &rock : rocks) {
           // Skip rocks not belonging to this batch
@@ -701,7 +701,7 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
 
           // Only update world matrix + commit + draw
           batch.mesh->RenderBatchInstance(&mWorld);
-          renderedRocks++;
+          renderedScatter++;
 
           if (showColliders) {
             debugMatrices.push_back(mWorld);
@@ -720,15 +720,15 @@ void RockScatter::Render(LPDIRECT3DDEVICE9 pDev) {
   }
 }
 
-void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
-  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) == 0)
+void Scatterer::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
+  if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACESCATTER) == 0)
     return;
   if (m_meshPool[0].empty() && m_meshPool[1].empty() && m_meshPool[2].empty())
     return;
 
-  const ::RockScatterCfg *pCfg = oapiGetRockScatterCfg(m_planet->Object());
+  const ::ScattererCfg *pCfg = oapiGetScattererCfg(m_planet->Object());
   if (!pCfg) return;
-  const ::RockScatterCfg &cfg = *pCfg;
+  const ::ScattererCfg &cfg = *pCfg;
   const Scene *scn = m_planet->GetScene();
   if (!scn)
     return;
@@ -736,7 +736,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
   if (scn->GetCameraProxyVisual() != m_planet)
     return;
 
-  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST);
+  float activeDrawDist = *(float*)g_client->GetConfigParam(CFGPRM_SCATTERMAXDIST);
   float fov = (float)scn->GetCameraAperture();
 
   VECTOR3 camGlob = scn->GetCameraGPos();
@@ -793,7 +793,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
   int vesselIlat = (int)((PI * 0.5 - vesselLat) / tileSize);
   int vesselIlng = (int)((vesselLng + PI) / tileSize);
   int nLngBands = 1 << (lvl + 1);
-  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_ROCKMAXDIST) / cfg.fDrawDist * 0.5)));
+  int searchR = max(2, min(25, (int)ceil(*(float*)g_client->GetConfigParam(CFGPRM_SCATTERMAXDIST) / cfg.fDrawDist * 0.5)));
 
   float drawDist2 = activeDrawDist * activeDrawDist;
   D3DXVECTOR4 param = D9OffsetRange(planetRad, 30e3);
@@ -823,7 +823,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
     }
   }
 
-  int renderedRocks = 0;
+  int renderedScatter = 0;
 
   for (const auto &batch : batches) {
     if (!batch.mesh)
@@ -840,7 +840,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
         int tilng = (vesselIlng + dlng) % nLngBands;
         if (tilng < 0)
           tilng += nLngBands;
-        const auto &rocks = GetRocksForTile(lvl, tilat, tilng);
+        const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
 
         for (const auto &rock : rocks) {
           if (rock.sizeClass != batch.sizeClass ||
@@ -936,7 +936,7 @@ void RockScatter::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
 
           batch.mesh->RenderShadowBatchInstance(scale, &mProj, &mWorld, &nrml,
                                                 &param);
-          renderedRocks++;
+          renderedScatter++;
         }
       }
     }

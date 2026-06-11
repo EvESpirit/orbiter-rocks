@@ -7703,10 +7703,10 @@ DLLCLBK char *ModuleDate () { return (char*)__DATE__; }
 #endif
 
 // ======================================================================
-// Rock scatterer API
+// Scattererer API
 // ======================================================================
 
-struct RockScatterCfg {
+struct ScattererCfg {
 	bool bEnabled;           // Master enable
 	float fDrawDist;         // Max draw distance in metres (default 500)
 	float fDensity;          // Rocks per square metre      (default 0.01)
@@ -7720,7 +7720,7 @@ struct RockScatterCfg {
 	char sMeshPrefix[256];   // Optional custom mesh prefix for procedural loading
 };
 
-struct RockInstance {
+struct ScatterInstance {
 	VECTOR3 localPos;        // Position on unit sphere (geocentric direction)
 	float elevation;         // Surface elevation at the point (metres)
 	float scale;             // Size multiplier
@@ -7729,8 +7729,8 @@ struct RockInstance {
 	uint8_t meshIndex;       // Index of the specific mesh
 };
 
-OAPIFUNC const RockScatterCfg* oapiGetRockScatterCfg(OBJHANDLE hPlanet);
-OAPIFUNC const RockInstance* oapiGetRockScatterTiles(OBJHANDLE hPlanet, int lvl, int ilat, int ilng, int* nRocks);
-OAPIFUNC double oapiGetRockElevationModifier(OBJHANDLE hPlanet, double lng, double lat);
+OAPIFUNC const ScattererCfg* oapiGetScattererCfg(OBJHANDLE hPlanet);
+OAPIFUNC const ScatterInstance* oapiGetScatterTiles(OBJHANDLE hPlanet, int lvl, int ilat, int ilng, int* nScatter);
+OAPIFUNC double oapiGetScatterElevationModifier(OBJHANDLE hPlanet, double lng, double lat);
 
 #endif // !__ORBITERAPI_H

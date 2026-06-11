@@ -37,7 +37,7 @@
 #include "State.h"
 #include "Util.h"
 #include "Planet.h"
-#include "RockScatter.h"
+#include "Scatterer.h"
 #include "Mesh.h"
 #include "elevmgr.h"
 #include <fstream>
@@ -6592,9 +6592,9 @@ void Vessel::Update (bool force)
 	if (proxyplanet && fstatus != FLIGHTSTATUS_LANDED && !bFRplayback) {
 
 		// mesh-to-mesh collision using cached hull vertices
-		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bRockCollision && sp.alt < 2.0 * size) {
+		if (g_pOrbiter->Cfg()->CfgPhysicsPrm.bScatterCollision && sp.alt < 2.0 * size) {
 			Planet *pp = (Planet*)proxyplanet;
-			RockScatter *rs = pp->GetRockScatter();
+			Scatterer *rs = pp->GetScatterer();
 			if (rs) {
 				// Update hull cache (includes animations and touchdown points)
 				UpdateHullCacheP();
@@ -6665,7 +6665,7 @@ void Vessel::Update (bool force)
 							}
 						}
 
-						oapiWriteLogV("ROCK_COLLISION[%s]: depth=%.4f vToward=%.3f "
+						oapiWriteLogV("SCATTER_COLLISION[%s]: depth=%.4f vToward=%.3f "
 									  "normal=(%.3f,%.3f,%.3f)",
 									  Name(), hitRes.depth, vToward, norm.x, norm.y,
 									  norm.z);

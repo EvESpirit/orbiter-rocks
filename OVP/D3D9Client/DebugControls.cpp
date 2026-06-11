@@ -100,9 +100,9 @@ public:
 		ImGui::PushItemWidth(150.0);
 		ImGui::SeparatorText("Physics Colliders");
 		
-		bool rock = Config->bShowRockColliders == 1;
-		if (ImGui::Checkbox("Show Rock Colliders", &rock))
-			Config->bShowRockColliders = rock ? 1 : 0;
+		bool rock = Config->bShowScatterColliders == 1;
+		if (ImGui::Checkbox("Show Scatter Colliders", &rock))
+			Config->bShowScatterColliders = rock ? 1 : 0;
 			
 		bool base = Config->bShowBaseColliders == 1;
 		if (ImGui::Checkbox("Show Base Colliders", &base))

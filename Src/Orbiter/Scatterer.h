@@ -1,11 +1,11 @@
 // Copyright (c) EvESpirit
 // Licensed under the MIT License
 // ==============================================================
-// RockScatter.h
+// Scatterer.h
 // Part of the ORBITER core engine
 // ==============================================================
 //
-// Core rock scatter system - procedurally generates deterministic
+// Core surface scatter system - procedurally generates deterministic
 // rock fields on planetary surfaces and provides collision geometry.
 // Rendering is handled separately by the graphics client.
 // ==============================================================
@@ -24,16 +24,16 @@
 
 class Planet;
 
-class RockScatter {
+class Scatterer {
 public:
-  RockScatter(Planet *planet);
-  ~RockScatter();
+  Scatterer(Planet *planet);
+  ~Scatterer();
 
-  /// Get the config for this planet's rock scatter
-  const RockScatterCfg& GetConfig() const { return m_cfg; }
+  /// Get the config for this planet's surface scatter
+  const ScattererCfg& GetConfig() const { return m_cfg; }
 
   /// Get rocks for a specific tile (cached)
-  const std::vector<RockInstance>& GetRocksForTile(int lvl, int ilat, int ilng) const;
+  const std::vector<ScatterInstance>& GetScatterForTile(int lvl, int ilat, int ilng) const;
 
   /// Get the additional elevation caused by rocks at a given lng/lat
   double GetElevationModifier(double lng, double lat) const;
@@ -69,7 +69,7 @@ public:
   }
 
 public:
-  struct RockTileData {
+  struct ScatterTileData {
     uint8_t *data;
     uint8_t *originalData;
     int width, height;
@@ -79,7 +79,7 @@ public:
     bool isDXT5;
     int lvl_loaded, ilat_loaded, ilng_loaded;
 
-    RockTileData() : data(nullptr), originalData(nullptr), width(0), height(0), bpp(0), rMask(0), gMask(0), bMask(0), aMask(0), isDXT1(false), isDXT5(false), lvl_loaded(0), ilat_loaded(0), ilng_loaded(0) {}
+    ScatterTileData() : data(nullptr), originalData(nullptr), width(0), height(0), bpp(0), rMask(0), gMask(0), bMask(0), aMask(0), isDXT1(false), isDXT5(false), lvl_loaded(0), ilat_loaded(0), ilng_loaded(0) {}
   };
 
 private:
@@ -109,7 +109,7 @@ private:
   void LoadBaseClearZones();
   bool IsInClearZone(double lng, double lat) const;
   void BuildCollisionGeometry();
-  void LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &tileData) const;
+  void LoadScatterMapTile(int lvl, int ilat, int ilng, ScatterTileData &tileData) const;
 
   static uint32_t HashTile(uint32_t seed, int lvl, int ilat, int ilng);
   static uint32_t XorShift32(uint32_t &state);
@@ -119,21 +119,22 @@ private:
   static VECTOR3 Norm3(const VECTOR3 &v);
 
   Planet *m_planet;
-  RockScatterCfg m_cfg;
+  ScattererCfg m_cfg;
 
   std::vector<float> m_meshBottomExtent[3];
   std::vector<CollisionGeom> m_collGeom[3];
   int m_meshCount[3]; // number of mesh variants per size class
 
   mutable std::mutex m_cacheMutex;
-  mutable std::unordered_map<TileKey, std::vector<RockInstance>, TileKeyHash> m_cache;
-  mutable std::unordered_map<TileKey, RockTileData, TileKeyHash> m_mapCache;
+  mutable std::unordered_map<TileKey, std::vector<ScatterInstance>, TileKeyHash> m_cache;
+  mutable std::unordered_map<TileKey, ScatterTileData, TileKeyHash> m_mapCache;
 
-  ZTreeMgr *m_rockTreeMgr;
-  bool m_bRockDirExists;
+  ZTreeMgr *m_scatterTreeMgr;
+  bool m_bScatterDirExists;
 
   uint32_t m_seed;
   std::vector<ClearZone> m_clearZones;
+  mutable float m_lastDensityMult;
 
   static float RaycastMeshY(const CollisionGeom &geom, float localX, float localZ);
 };

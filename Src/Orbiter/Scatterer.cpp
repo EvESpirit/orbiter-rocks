@@ -1,10 +1,10 @@
 // Copyright (c) EvESpirit
 // Licensed under the MIT License
 // ==============================================================
-// RockScatter.cpp - Core engine rock scatter (data + collision only)
+// Scatterer.cpp - Core engine surface scatter (data + collision only)
 // ==============================================================
 
-#include "RockScatter.h"
+#include "Scatterer.h"
 #include "Planet.h"
 #include "Orbiter.h"
 #include "Log.h"
@@ -67,7 +67,7 @@ static void DecodeDXT1Pixel(const uint8_t *data, int width, int x, int y, uint8_
     }
 }
 
-static void GetPixelRGB(const RockScatter::RockTileData &td, int x, int y, uint8_t &r, uint8_t &g, uint8_t &b) {
+static void GetPixelRGB(const Scatterer::ScatterTileData &td, int x, int y, uint8_t &r, uint8_t &g, uint8_t &b) {
     if (!td.data) { r = 255; g = 128; b = 0; return; }
     if (x < 0) x = 0; if (x >= td.width) x = td.width - 1;
     if (y < 0) y = 0; if (y >= td.height) y = td.height - 1;
@@ -111,7 +111,7 @@ static void GetPixelRGB(const RockScatter::RockTileData &td, int x, int y, uint8
 
 // ---- PRNG helpers ----
 
-uint32_t RockScatter::HashTile(uint32_t seed, int lvl, int ilat, int ilng) {
+uint32_t Scatterer::HashTile(uint32_t seed, int lvl, int ilat, int ilng) {
   uint32_t h = seed;
   h ^= (uint32_t)lvl * 2654435761u;
   h ^= (uint32_t)ilat * 2246822519u;
@@ -122,20 +122,20 @@ uint32_t RockScatter::HashTile(uint32_t seed, int lvl, int ilat, int ilng) {
   return h ? h : 1u;
 }
 
-uint32_t RockScatter::XorShift32(uint32_t &state) {
+uint32_t Scatterer::XorShift32(uint32_t &state) {
   state ^= state << 13; state ^= state >> 17; state ^= state << 5;
   return state;
 }
 
-float RockScatter::RandFloat(uint32_t &state) {
+float Scatterer::RandFloat(uint32_t &state) {
   return float(XorShift32(state) & 0x00FFFFFFu) / float(0x01000000u);
 }
 
-float RockScatter::RandRange(uint32_t &state, float lo, float hi) {
+float Scatterer::RandRange(uint32_t &state, float lo, float hi) {
   return lo + RandFloat(state) * (hi - lo);
 }
 
-VECTOR3 RockScatter::Norm3(const VECTOR3 &v) {
+VECTOR3 Scatterer::Norm3(const VECTOR3 &v) {
   double len = sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
   if (len < 1e-12) return _V(0,1,0);
   return _V(v.x/len, v.y/len, v.z/len);
@@ -143,7 +143,7 @@ VECTOR3 RockScatter::Norm3(const VECTOR3 &v) {
 
 // Collision geometry from loaded meshes
 
-void RockScatter::BuildCollisionGeometry() {
+void Scatterer::BuildCollisionGeometry() {
   for (int i = 0; i < 3; i++) {
     m_collGeom[i].clear();
     m_meshBottomExtent[i].clear();
@@ -277,25 +277,26 @@ void RockScatter::BuildCollisionGeometry() {
 
 // Constructor / Destructor
 
-RockScatter::RockScatter(Planet *planet)
-    : m_planet(planet), m_seed(0) {
+Scatterer::Scatterer(Planet *planet)
+    : m_planet(planet), m_seed(0),
+      m_lastDensityMult(g_pOrbiter->Cfg()->CfgVisualPrm.fScatterDensityMult) {
   memset(&m_cfg, 0, sizeof(m_cfg));
   m_meshCount[0] = m_meshCount[1] = m_meshCount[2] = 0;
-  m_rockTreeMgr = nullptr;
-  m_bRockDirExists = false;
+  m_scatterTreeMgr = nullptr;
+  m_bScatterDirExists = false;
 
   // Read config from planet - it must have been parsed already
-  // (Planet stores it in RockCfg)
-  memcpy(&m_cfg, &planet->RockCfg, sizeof(RockScatterCfg));
+  // (Planet stores it in ScatterCfg)
+  memcpy(&m_cfg, &planet->ScatterCfg, sizeof(ScattererCfg));
 
   char cbuf[256], path[256], fname[256];
   if (planet->Name()) {
     g_pOrbiter->Cfg()->PTexPath(cbuf, planet->Name());
-    m_rockTreeMgr = ZTreeMgr::CreateFromFile(cbuf, ZTreeMgr::LAYER_ROCK);
-    sprintf(fname, "%s\\Rock", planet->Name());
+    m_scatterTreeMgr = ZTreeMgr::CreateFromFile(cbuf, ZTreeMgr::LAYER_SCATTER);
+    sprintf(fname, "%s\\Scatter", planet->Name());
     g_pOrbiter->Cfg()->PTexPath(path, fname);
     DWORD attr = GetFileAttributesA(path);
-    m_bRockDirExists = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
+    m_bScatterDirExists = (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
   }
 
   const char *name = planet->Name();
@@ -310,22 +311,22 @@ RockScatter::RockScatter(Planet *planet)
   LoadBaseClearZones();
 }
 
-RockScatter::~RockScatter() {
+Scatterer::~Scatterer() {
   std::lock_guard<std::mutex> lock(m_cacheMutex);
   m_cache.clear();
   for (auto &pair : m_mapCache) {
       if (pair.second.originalData) {
-          if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(pair.second.originalData);
+          if (m_scatterTreeMgr && !m_bScatterDirExists) m_scatterTreeMgr->ReleaseData(pair.second.originalData);
           else delete [] pair.second.originalData;
       }
   }
   m_mapCache.clear();
-  if (m_rockTreeMgr) delete m_rockTreeMgr;
+  if (m_scatterTreeMgr) delete m_scatterTreeMgr;
 }
 
 // Base clear zones
 
-void RockScatter::LoadBaseClearZones() {
+void Scatterer::LoadBaseClearZones() {
   m_clearZones.clear();
   OBJHANDLE hPlanet = (OBJHANDLE)m_planet;
   if (!hPlanet) return;
@@ -369,7 +370,7 @@ void RockScatter::LoadBaseClearZones() {
   }
 }
 
-bool RockScatter::IsInClearZone(double lng, double lat) const {
+bool Scatterer::IsInClearZone(double lng, double lat) const {
   if (m_clearZones.empty()) return false;
   double planetRad = m_planet->Size();
 
@@ -389,9 +390,9 @@ bool RockScatter::IsInClearZone(double lng, double lat) const {
   return false;
 }
 
-// Rock generation
+// Scatter generation
 
-void RockScatter::LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &tileData) const {
+void Scatterer::LoadScatterMapTile(int lvl, int ilat, int ilng, ScatterTileData &tileData) const {
   BYTE *buf = nullptr;
   DWORD size = 0;
   
@@ -400,9 +401,9 @@ void RockScatter::LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &til
   int cur_ilng = ilng;
 
   while (cur_lvl >= 0) {
-      if (m_bRockDirExists) {
+      if (m_bScatterDirExists) {
           char fname[256], path[256];
-          sprintf(fname, "%s\\Rock\\%02d\\%06d\\%06d.dds", m_planet->Name(), cur_lvl, cur_ilat, cur_ilng);
+          sprintf(fname, "%s\\Scatter\\%02d\\%06d\\%06d.dds", m_planet->Name(), cur_lvl, cur_ilat, cur_ilng);
           g_pOrbiter->Cfg()->PTexPath(path, fname);
           FILE *f = fopen(path, "rb");
           if (f) {
@@ -417,10 +418,10 @@ void RockScatter::LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &til
           }
       }
       
-      if (!buf && m_rockTreeMgr) {
-          // Rock map directory levels are offset by 4 from ZTreeMgr quadtree levels:
+      if (!buf && m_scatterTreeMgr) {
+          // Scatter map directory levels are offset by 4 from ZTreeMgr quadtree levels:
           // Dir level 0 (1 lat x 2 lng) = tree level 4 (rootPos4)
-          size = m_rockTreeMgr->ReadData(cur_lvl + 4, cur_ilat, cur_ilng, &buf);
+          size = m_scatterTreeMgr->ReadData(cur_lvl + 4, cur_ilat, cur_ilng, &buf);
       }
       
       if (buf) break; // Successfully found a tile
@@ -460,23 +461,30 @@ void RockScatter::LoadRockMapTile(int lvl, int ilat, int ilng, RockTileData &til
           tileData.data = buf + 128;
       } else {
           // Unsupported DDS format
-          if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(buf);
+          if (m_scatterTreeMgr && !m_bScatterDirExists) m_scatterTreeMgr->ReleaseData(buf);
           else delete [] buf;
           tileData.data = nullptr;
           tileData.originalData = nullptr;
       }
   } else {
-      if (m_rockTreeMgr && !m_bRockDirExists) m_rockTreeMgr->ReleaseData(buf);
+      if (m_scatterTreeMgr && !m_bScatterDirExists) m_scatterTreeMgr->ReleaseData(buf);
       else delete [] buf;
       tileData.data = nullptr;
       tileData.originalData = nullptr;
   }
 }
 
-const std::vector<RockInstance>&
-RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
+const std::vector<ScatterInstance>&
+Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
   TileKey key = {lvl, ilat, ilng};
   std::lock_guard<std::mutex> lock(m_cacheMutex);
+  
+  float currentDensityMult = g_pOrbiter->Cfg()->CfgVisualPrm.fScatterDensityMult;
+  if (currentDensityMult != m_lastDensityMult) {
+    m_cache.clear();
+    m_lastDensityMult = currentDensityMult;
+  }
+  
   auto it = m_cache.find(key);
   if (it != m_cache.end()) return it->second;
 
@@ -493,29 +501,29 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
   if (areaM2 < 1.0) return rocks;
 
   if (!m_cfg.bEnabled) return rocks;
-  if (!g_pOrbiter->Cfg()->CfgVisualPrm.bSurfaceRocks) return rocks;
+  if (!g_pOrbiter->Cfg()->CfgVisualPrm.bSurfaceScatter) return rocks;
   
-  float densityMult = g_pOrbiter->Cfg()->CfgVisualPrm.fRockDensityMult;
+  float densityMult = g_pOrbiter->Cfg()->CfgVisualPrm.fScatterDensityMult;
   if (densityMult <= 0.0f) return rocks;
   
-  float density = m_cfg.fDensity * densityMult;
+  float density = m_cfg.fDensity;  // densityMult applied as probability filter below
 
-  int nRocks = (int)(density * areaM2);
-  if (nRocks > 5000) nRocks = 5000;
-  if (nRocks <= 0) return rocks;
+  int nScatter = (int)(density * areaM2);
+  if (nScatter > 5000) nScatter = 5000;
+  if (nScatter <= 0) return rocks;
 
   uint32_t rng = HashTile(m_seed, lvl, ilat, ilng);
-  rocks.reserve(nRocks);
+  rocks.reserve(nScatter);
 
-  for (int i = 0; i < nRocks; i++) {
+  for (int i = 0; i < nScatter; i++) {
     double lat = latMin + RandFloat(rng) * (latMax - latMin);
     double lng = lngMin + RandFloat(rng) * tileSize;
 
-    RockTileData td;
+    ScatterTileData td;
     {
       auto mt = m_mapCache.find(key);
       if (mt == m_mapCache.end()) {
-          LoadRockMapTile(lvl, ilat, ilng, td);
+          LoadScatterMapTile(lvl, ilat, ilng, td);
           m_mapCache[key] = td;
       } else {
           td = mt->second;
@@ -537,18 +545,18 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
         
         if (i == 0) {
             char logbuf[256];
-            sprintf(logbuf, "RockScatter Debug: req_lvl=%d, loaded_lvl=%d, tx=%.3f, ty=%.3f, px=%d, py=%d, red=%d, nRocks=%d", lvl, td.lvl_loaded, tx, ty, px, py, red, nRocks);
+            sprintf(logbuf, "Scatterer Debug: req_lvl=%d, loaded_lvl=%d, tx=%.3f, ty=%.3f, px=%d, py=%d, red=%d, nScatter=%d", lvl, td.lvl_loaded, tx, ty, px, py, red, nScatter);
             oapiWriteLog(logbuf);
         }
     } else if (i == 0) {
         char logbuf[256];
-        sprintf(logbuf, "RockScatter Debug: req_lvl=%d, NO DATA LOADED", lvl);
+        sprintf(logbuf, "Scatterer Debug: req_lvl=%d, NO DATA LOADED", lvl);
         oapiWriteLog(logbuf);
     }
     
     // Determine probability based on quadtree presence
     float prob = 1.0f;
-    if (m_bRockDirExists || m_rockTreeMgr) {
+    if (m_bScatterDirExists || m_scatterTreeMgr) {
         // Base floor: 25% probability everywhere (the Moon almost always has scatter).
         // Map data adds up to 75% more, using sqrt() to stretch the compressed low-end
         // Diviner values into visible density differences. The densest areas hit 100%.
@@ -563,12 +571,20 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
             prob = 0.08f;
         }
     }
+    prob *= densityMult;
     
     if (RandFloat(rng) > prob) {
+        // Consume the same RNG calls that an accepted rock would use,
+        // keeping the sequence synchronised so that lowering density
+        // only removes rocks without reshuffling the survivors.
+        RandFloat(rng);              // size-class roll
+        RandFloat(rng);              // scale (RandRange)
+        RandFloat(rng);              // meshIndex
+        RandFloat(rng);              // rotY
         continue;
     }
 
-    RockInstance rock;
+    ScatterInstance rock;
     double clat = cos(lat), slat = sin(lat), clng = cos(lng), slng = sin(lng);
     rock.localPos = _V(clat * clng, slat, clat * slng);
     rock.elevation = (float)oapiSurfaceElevation((OBJHANDLE)m_planet, lng, lat);
@@ -606,7 +622,7 @@ RockScatter::GetRocksForTile(int lvl, int ilat, int ilng) const {
 
 // Raycast
 
-float RockScatter::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
+float Scatterer::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
   float bestY = -1e30f;
   for (const auto &tri : geom.tris) {
     float ax = (float)tri.v0.x, az = (float)tri.v0.z;
@@ -632,7 +648,7 @@ float RockScatter::RaycastMeshY(const CollisionGeom &geom, float lx, float lz) {
 
 // Elevation modifier
 
-double RockScatter::GetElevationModifier(double lng, double lat) const {
+double Scatterer::GetElevationModifier(double lng, double lat) const {
   if (!m_cfg.bEnabled) return 0.0;
 
   double planetRad = m_planet->Size();
@@ -652,7 +668,7 @@ double RockScatter::GetElevationModifier(double lng, double lat) const {
     if (tilat < 0 || tilat >= (1 << lvl)) continue;
     for (int dlng = -1; dlng <= 1; dlng++) {
       int tilng = (centerIlng + dlng + nLngBands) % nLngBands;
-      const auto &rocks = GetRocksForTile(lvl, tilat, tilng);
+      const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
       for (const auto &rock : rocks) {
         if (rock.meshIndex >= (int)m_collGeom[rock.sizeClass].size()) continue;
         const CollisionGeom &cg = m_collGeom[rock.sizeClass][rock.meshIndex];
@@ -687,8 +703,8 @@ double RockScatter::GetElevationModifier(double lng, double lat) const {
 
 // Collisions
 
-RockScatter::CollisionResult
-RockScatter::CheckCollision(const VECTOR3 *hullPts, int nPts,
+Scatterer::CollisionResult
+Scatterer::CheckCollision(const VECTOR3 *hullPts, int nPts,
                             const VECTOR3 &vesselPosLocal, double vesselRadius,
                             float maxCollisionDist) const {
   CollisionResult result = {false, {0,0,0}, 0.0, {0,0,0}};
@@ -725,7 +741,7 @@ RockScatter::CheckCollision(const VECTOR3 *hullPts, int nPts,
     if (tilat < 0 || tilat >= nLat) continue;
     for (int dLng = -searchR; dLng <= searchR; dLng++) {
       int tilng = ((centerIlng + dLng) % nLng + nLng) % nLng;
-      const auto &rocks = GetRocksForTile(lvl, tilat, tilng);
+      const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
 
       for (const auto &rock : rocks) {
         if (rock.meshIndex >= (int)m_collGeom[rock.sizeClass].size()) continue;

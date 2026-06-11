@@ -24,7 +24,7 @@
 #include "Scene.h"
 #include "CelSphere.h"
 #include "VPlanet.h"
-#include "RockScatter.h"
+#include "Scatterer.h"
 #include "D3D9Pad.h"
 #include "CSphereMgr.h"
 #include "Scene.h"

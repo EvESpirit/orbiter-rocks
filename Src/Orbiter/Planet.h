@@ -26,7 +26,7 @@
 #include <filesystem>
 namespace fs = std::filesystem;
 
-class RockScatter;
+class Scatterer;
 
 #define FILETYPE_MARKER 1
 
@@ -94,8 +94,8 @@ public:
 
 	int Type() const { return OBJTP_PLANET; }
 
-	RockScatterCfg RockCfg;
-	RockScatter *GetRockScatter() const { return m_rockScatter; }
+	ScattererCfg ScatterCfg;
+	Scatterer *GetScatterer() const { return m_scatterer; }
 
 	const void *GetParam (DWORD paramtype) const;
 
@@ -308,7 +308,7 @@ private:
 	ElevationManager *emgr;           // elevation manager
 	double elev_res;                  // target elevation resolution [m]
 
-	RockScatter *m_rockScatter;       // core rock scatter system (owned)
+	Scatterer *m_scatterer;       // core surface scatter system (owned)
 };
 
 #endif // !__PLANET_H

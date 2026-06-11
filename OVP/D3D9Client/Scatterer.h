@@ -1,12 +1,12 @@
 // ==============================================================
-// RockScatter.h
+// Scatterer.h
 // Part of the ORBITER VISUALISATION PROJECT (OVP)
 // Dual licensed under GPL v3 and LGPL v3
 // Copyright (c) EvESpirit
 // ==========================================================================================
 
 // ==============================================================
-// Procedural surface rock scatter system.
+// Procedural surface surface scatter system.
 // Generates deterministic fields of small, medium and large rocks
 // on planetary surfaces that support the feature.  Every tile
 // always produces the exact same rock field given the same seed.
@@ -26,15 +26,15 @@
 
 class vPlanet;
 
-// RockScatterCfg is now defined in OrbiterAPI.h (core engine).
-// The D3D9 client uses the core's definition via oapiGetRockScatterCfg().
+// ScattererCfg is now defined in OrbiterAPI.h (core engine).
+// The D3D9 client uses the core's definition via oapiGetScattererCfg().
 
 // Scatter renderer
 
-class RockScatter {
+class Scatterer {
 public:
-  RockScatter(vPlanet *planet, LPDIRECT3DDEVICE9 pDev);
-  ~RockScatter();
+  Scatterer(vPlanet *planet, LPDIRECT3DDEVICE9 pDev);
+  ~Scatterer();
 
   /// Called once per frame from vPlanet::Render().
   void Render(LPDIRECT3DDEVICE9 pDev);
@@ -46,7 +46,7 @@ public:
 
 private:
   // One rock instance inside a tile
-  struct RockInstance {
+  struct ScatterInstance {
     D3DXVECTOR3 localPos; // Position on unit sphere (geocentric direction)
     float elevation;      // Surface elevation at the point (metres)
     float scale;          // Size multiplier
@@ -75,13 +75,13 @@ private:
 
 
   // Generate (or look up cached) rocks for one tile
-  const std::vector<RockInstance> &GetRocksForTile(int lvl, int ilat,
+  const std::vector<ScatterInstance> &GetScatterForTile(int lvl, int ilat,
                                                    int ilng) const;
 
 
 
   // Build procedural icosphere-based rock meshes
-  void CreateRockMeshes();
+  void CreateScatterMeshes();
   void CreateIcosphereMesh(int subdivisions, UINT seed, float baseScale,
                            std::vector<NTVERTEX> &outVerts,
                            std::vector<WORD> &outIdxs);
@@ -102,7 +102,7 @@ private:
 
   // Cached per-tile rock lists
   mutable std::mutex m_cacheMutex;
-  mutable std::unordered_map<TileKey, std::vector<RockInstance>, TileKeyHash>
+  mutable std::unordered_map<TileKey, std::vector<ScatterInstance>, TileKeyHash>
       m_cache;
 
   // Derived seed (computed once from planet name + config seed)

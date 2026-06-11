@@ -38,7 +38,7 @@ extern class D3D9Client* g_client;
 #include "VectorHelpers.h"
 #include "OapiExtension.h"
 #include "IProcess.h"
-#include "RockScatter.h"
+#include "Scatterer.h"
 #include <filesystem>
 
 using namespace oapi;
@@ -370,7 +370,7 @@ vPlanet::vPlanet (OBJHANDLE _hObj, const Scene *scene) :
 {
 	memset(&MicroCfg, 0, sizeof(MicroCfg));
 
-	rockScatter = NULL;
+	scatterer = NULL;
 	vRefPoint = _V(1,0,0);
 	atm_mode = 0;
 	iConfig = 0;
@@ -514,7 +514,7 @@ vPlanet::vPlanet (OBJHANDLE _hObj, const Scene *scene) :
 
 	ParseConfig(oapiGetObjectFileName(hObj));
 
-	// RockScatter is created lazily on first Render() to ensure D3D is fully ready
+	// Scatterer is created lazily on first Render() to ensure D3D is fully ready
 
 	UpdateScatter();
 
@@ -567,7 +567,7 @@ vPlanet::~vPlanet ()
 	if (hazemgr2) delete hazemgr2;
 	if (ringmgr)  delete ringmgr;
 	if (mesh)     delete mesh;
-	if (rockScatter) delete rockScatter;
+	if (scatterer) delete scatterer;
 
 	SAFE_RELEASE(pSunColor);
 	SAFE_RELEASE(pRaySkyView);
@@ -625,7 +625,7 @@ bool vPlanet::ParseConfig(const char* fname)
 		}
 
 		// Rock scatter config parsing has been moved to the core engine (Planet.cpp).
-		// The D3D9 client accesses it via oapiGetRockScatterCfg().
+		// The D3D9 client accesses it via oapiGetScattererCfg().
 	}
 	return true;
 }
@@ -1071,11 +1071,11 @@ bool vPlanet::Render(LPDIRECT3DDEVICE9 dev)
 		}
 
 		// Render procedural rocks - only if the core engine has rock config for this planet
-		if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS)) {
-			const ::RockScatterCfg *pRockCfg = oapiGetRockScatterCfg(hObj);
+		if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACESCATTER)) {
+			const ::ScattererCfg *pRockCfg = oapiGetScattererCfg(hObj);
 			if (pRockCfg && pRockCfg->bEnabled) {
-				if (!rockScatter) rockScatter = new RockScatter(this, dev);
-				rockScatter->Render(dev);
+				if (!scatterer) scatterer = new Scatterer(this, dev);
+				scatterer->Render(dev);
 			}
 		}
 
@@ -1276,8 +1276,8 @@ void vPlanet::RenderBaseShadows(LPDIRECT3DDEVICE9 dev, float depth)
 		if (bObjectShadow) {
 			for (DWORD i = 0; i < nbase; i++) if (vbase[i]) vbase[i]->RenderGroundShadow(dev, depth);
 			
-			if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACEROCKS) && Config->bRockShadows) {
-				if (rockScatter) rockScatter->RenderShadows(dev, depth);
+			if (*(bool*)g_client->GetConfigParam(CFGPRM_SURFACESCATTER) && Config->bScatterShadows) {
+				if (scatterer) scatterer->RenderShadows(dev, depth);
 			}
 			
 			// reset device parameters
