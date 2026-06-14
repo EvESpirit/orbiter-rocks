@@ -326,10 +326,10 @@ rocc_Material
 MATERIAL rocc_Material
 1.0 1.0 1.0 1.0
 1.0 1.0 1.0 1.0
-1.0 1.0 1.0 1.0 20.0
+0.0 0.0 0.0 1.0 20.0
 0.0 0.0 0.0 1.0
 
 TEXTURES 1
-LunarRock_A.dds
+LunarScatter_A.dds
 
 

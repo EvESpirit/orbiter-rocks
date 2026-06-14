@@ -508,14 +508,25 @@ Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
   
   float density = m_cfg.fDensity;  // densityMult applied as probability filter below
 
-  int nScatter = (int)(density * areaM2);
-  if (nScatter > 5000) nScatter = 5000;
-  if (nScatter <= 0) return rocks;
+  // Scale density down for extremely tiny bodies (like Phobos/Deimos) to prevent visual overcrowding
+  // due to their tight surface curvature and full-body rendering within the draw distance.
+  float curRad = (float)m_planet->Size();
+  float sizeScale = 1.0f;
+  if (curRad < 50000.0f) {
+      sizeScale = curRad / 50000.0f;
+      if (sizeScale < 0.1f) sizeScale = 0.1f;
+  }
+
+  int maxCandidates = (int)(density * areaM2 * sizeScale);
+  if (maxCandidates > 250000) maxCandidates = 250000;
+  if (maxCandidates <= 0) return rocks;
+
+  int targetRocks = 25000;
 
   uint32_t rng = HashTile(m_seed, lvl, ilat, ilng);
-  rocks.reserve(nScatter);
+  rocks.reserve(std::min(maxCandidates, targetRocks));
 
-  for (int i = 0; i < nScatter; i++) {
+  for (int i = 0; i < maxCandidates; i++) {
     double lat = latMin + RandFloat(rng) * (latMax - latMin);
     double lng = lngMin + RandFloat(rng) * tileSize;
 
@@ -545,7 +556,7 @@ Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
         
         if (i == 0) {
             char logbuf[256];
-            sprintf(logbuf, "Scatterer Debug: req_lvl=%d, loaded_lvl=%d, tx=%.3f, ty=%.3f, px=%d, py=%d, red=%d, nScatter=%d", lvl, td.lvl_loaded, tx, ty, px, py, red, nScatter);
+            sprintf(logbuf, "Scatterer Debug: req_lvl=%d, loaded_lvl=%d, tx=%.3f, ty=%.3f, px=%d, py=%d, red=%d, maxCandidates=%d", lvl, td.lvl_loaded, tx, ty, px, py, red, maxCandidates);
             oapiWriteLog(logbuf);
         }
     } else if (i == 0) {
@@ -570,6 +581,16 @@ Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
             // Missing tile = barren mare plain
             prob = 0.08f;
         }
+    } else {
+        // Procedural Density Fallback for bodies without a quadtree
+        // Create natural clumping using coarse lat/lng clustering
+        int coarse_lat = (int)(lat * 40.0);
+        int coarse_lng = (int)(lng * 40.0);
+        uint32_t clump_rng = HashTile(m_seed, 0, coarse_lat, coarse_lng);
+        float noise = RandFloat(clump_rng); // 0.0 to 1.0
+        
+        // Base 5% + up to 45% based on noise (average ~27.5%)
+        prob = 0.05f + 0.45f * noise;
     }
     prob *= densityMult;
     
@@ -616,6 +637,7 @@ Scatterer::GetScatterForTile(int lvl, int ilat, int ilng) const {
       if (IsInClearZone(rockLng, rockLat)) continue;
     }
     rocks.push_back(rock);
+    if (rocks.size() >= (size_t)targetRocks) break;
   }
   return rocks;
 }
