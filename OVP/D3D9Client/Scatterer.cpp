@@ -605,6 +605,13 @@ void Scatterer::Render(LPDIRECT3DDEVICE9 pDev) {
     std::vector<D3DXMATRIX> debugMatrices;
     bool showColliders = (Config->bShowScatterColliders == 1) || (DebugControls::IsActive() && (*(DWORD*)g_client->GetConfigParam(CFGPRM_GETDEBUGFLAGS) & 0x0004));
 
+    float lodCull = GetLodCull(batch.sizeClass);
+    float classDist = activeDrawDist * lodCull;
+    float classDist2 = drawDist2 * lodCull * lodCull;
+    float bottomOfs = 0.0f;
+    if (batch.meshIndex < m_meshBottomExtent[batch.sizeClass].size())
+      bottomOfs = m_meshBottomExtent[batch.sizeClass][batch.meshIndex];
+
     for (int dlat = -searchR; dlat <= searchR; dlat++) {
       int tilat = vesselIlat + dlat;
       if (tilat < 0 || tilat >= (1 << lvl))
@@ -615,6 +622,25 @@ void Scatterer::Render(LPDIRECT3DDEVICE9 pDev) {
         if (tilng < 0)
           tilng += nLngBands;
 
+        // Tile Culling
+        double latMax = PI * 0.5 - tileSize * tilat;
+        double latMin = latMax - tileSize;
+        double lngMin = -PI + tileSize * tilng;
+        double lngMax = lngMin + tileSize;
+        double midLat = (latMin + latMax) * 0.5;
+        double midLng = (lngMin + lngMax) * 0.5;
+        
+        double clat = cos(midLat), slat = sin(midLat);
+        double clng = cos(midLng), slng = sin(midLng);
+        D3DXVECTOR3 tileCenterLocal((float)(clat * clng * planetRad), (float)(slat * planetRad), (float)(clat * slng * planetRad));
+        
+        D3DXVECTOR3 diffTile = tileCenterLocal - vesselLocalDX;
+        float tileDist = D3DXVec3Length(&diffTile);
+        float tileRad = (float)(tileSize * planetRad * 0.75); // Margin
+        
+        if (tileDist - tileRad > classDist)
+            continue; // Skip entire tile!
+
         const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
 
         for (const auto &rock : rocks) {
@@ -624,21 +650,14 @@ void Scatterer::Render(LPDIRECT3DDEVICE9 pDev) {
             continue;
 
           // World position
-          float bottomOfs = 0.0f;
-          if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
-            bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
-            
           double rockAlt = planetRad + (double)rock.elevation + (double)bottomOfs * rock.scale;
           VECTOR3 rGeo = _V(rock.localPos.x * rockAlt, rock.localPos.y * rockAlt, rock.localPos.z * rockAlt);
+          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
 
           // Distance from vessel (not camera) for culling
-          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
           D3DXVECTOR3 diff = rockGeoFloat - vesselLocalDX;
           float dist2 = D3DXVec3LengthSq(&diff);
 
-          // LOD sub-cull by size class
-          float lodCull = GetLodCull(rock.sizeClass);
-          float classDist2 = drawDist2 * lodCull * lodCull;
           if (dist2 > classDist2)
             continue;
 
@@ -831,6 +850,13 @@ void Scatterer::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
 
     batch.mesh->RenderShadowBatchBegin(&param);
 
+    float lodCull = GetLodCull(batch.sizeClass);
+    float classDist = activeDrawDist * lodCull;
+    float classDist2 = drawDist2 * lodCull * lodCull;
+    float bottomOfs = 0.0f;
+    if (batch.meshIndex < m_meshBottomExtent[batch.sizeClass].size())
+      bottomOfs = m_meshBottomExtent[batch.sizeClass][batch.meshIndex];
+
     for (int dlat = -searchR; dlat <= searchR; dlat++) {
       int tilat = vesselIlat + dlat;
       if (tilat < 0 || tilat >= (1 << lvl))
@@ -840,6 +866,26 @@ void Scatterer::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
         int tilng = (vesselIlng + dlng) % nLngBands;
         if (tilng < 0)
           tilng += nLngBands;
+
+        // Tile Culling
+        double latMax = PI * 0.5 - tileSize * tilat;
+        double latMin = latMax - tileSize;
+        double lngMin = -PI + tileSize * tilng;
+        double lngMax = lngMin + tileSize;
+        double midLat = (latMin + latMax) * 0.5;
+        double midLng = (lngMin + lngMax) * 0.5;
+        
+        double clat = cos(midLat), slat = sin(midLat);
+        double clng = cos(midLng), slng = sin(midLng);
+        D3DXVECTOR3 tileCenterLocal((float)(clat * clng * planetRad), (float)(slat * planetRad), (float)(clat * slng * planetRad));
+        
+        D3DXVECTOR3 diffTile = tileCenterLocal - vesselLocalDX;
+        float tileDist = D3DXVec3Length(&diffTile);
+        float tileRad = (float)(tileSize * planetRad * 0.75); // Margin
+        
+        if (tileDist - tileRad > classDist)
+            continue; // Skip entire tile!
+
         const auto &rocks = GetScatterForTile(lvl, tilat, tilng);
 
         for (const auto &rock : rocks) {
@@ -847,18 +893,13 @@ void Scatterer::RenderShadows(LPDIRECT3DDEVICE9 pDev, float alpha) {
               rock.meshIndex != batch.meshIndex)
             continue;
 
-          float bottomOfs = 0.0f;
-          if (rock.meshIndex < m_meshBottomExtent[rock.sizeClass].size())
-            bottomOfs = m_meshBottomExtent[rock.sizeClass][rock.meshIndex];
-
           double rockAlt = planetRad + (double)rock.elevation + (double)bottomOfs * rock.scale;
           VECTOR3 rGeo = _V(rock.localPos.x * rockAlt, rock.localPos.y * rockAlt, rock.localPos.z * rockAlt);
+          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
 
           // Distance cull (hoisted vesselLocalDX)
-          D3DXVECTOR3 rockGeoFloat((float)rGeo.x, (float)rGeo.y, (float)rGeo.z);
           D3DXVECTOR3 diff = rockGeoFloat - vesselLocalDX;
-          if (D3DXVec3LengthSq(&diff) > drawDist2 * GetLodCull(rock.sizeClass) *
-                                            GetLodCull(rock.sizeClass))
+          if (D3DXVec3LengthSq(&diff) > classDist2)
             continue;
 
           // localPos is already unit-length - skip Norm3
